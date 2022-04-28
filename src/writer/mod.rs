@@ -63,11 +63,11 @@ impl AztecWriter {
         let mut dominos = Vec::new();
 
         let codeword_size: usize = match layers {
-            1..=2 => 6,
-            3..=8 => 8,
-            9..=22 => 10,
-            23..=32 => 12,
-            _ => panic!("Too many layers")
+            1..=2 => 3,
+            3..=8 => 4,
+            //9..=22 => 5,
+            //23..=32 => 6,
+            _ => panic!("Aztec code with {} layers is not supported", layers)
         };
 
         for layer in 0..layers {
@@ -93,7 +93,7 @@ impl AztecWriter {
 
         }
 
-        AztecWriter { size, dominos, codeword_size, current_domino: 0 }
+        AztecWriter { size, dominos, codeword_size, current_domino: 1 }
     }
 
     pub fn into_aztec(self) -> AztecCode {
@@ -104,7 +104,39 @@ impl AztecWriter {
             code[domino.tail()] = domino.tail;
         }
 
+        let mut service_message = [false; 28];
+        let count = (self.size - 11) / 4 - 1;
+        let codeword_count = (self.current_domino - 1) / self.codeword_size - 1;
+        service_message[0] = count & 2 == 2;
+        service_message[1] = count & 1 == 1;
+        for i in 0..6 {
+            service_message[2 + 5 - i] = (codeword_count >> i) & 1 == 1;
+        }
+        //self.error_correction(&mut service_message, (count << 6) + codeword_count);
+
+        let middle = self.size / 2;
+        let start_idx = middle - 5;
+        for i in 0..7 {
+            code[(start_idx, start_idx + 2 + i)]  = service_message[i     ];
+            code[(start_idx + 2 + i, middle + 5)] = service_message[i +  7];
+            code[(middle + 5, middle + 3 - i)]    = service_message[i + 14];
+            code[(middle + 3 - i, start_idx)]     = service_message[i + 21];
+        }
+
         code
+    }
+
+    fn error_correction(&self, code: &mut [bool], codewords: usize) {
+        let middle = self.size / 2;
+        let col = middle + 5;
+
+        let control1 = 0b1010;
+        let control2 = 0b1010;
+        let control3 = 0b1010;
+        let control4 = 0b1010;
+        let control5 = 0b1010;
+
+        todo!();
     }
 }
 
@@ -125,7 +157,7 @@ impl Write for AztecWriter {
     }
 
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let nb_dominos = buf.len() * 8 / 4;
+        let nb_dominos = buf.len() * 8 / 2;
         let remaining = self.dominos.len() - self.current_domino;
 
         if remaining < nb_dominos {
@@ -135,9 +167,10 @@ impl Write for AztecWriter {
         let mut idx = self.current_domino;
         for byte in buf {
             for bit in (0..8).step_by(2) {
+                let bit = 6 - bit;
                 let mut domino = &mut self.dominos[idx];
-                domino.head = ((byte >> bit)       & 1) == 1;
-                domino.tail = ((byte >> (bit + 1)) & 1) == 1;
+                domino.head = ((byte >> (bit + 1)) & 1) == 1;
+                domino.tail = ((byte >> bit)       & 1) == 1;
                 idx += 1;
             }
         }
@@ -153,7 +186,7 @@ impl Write for AztecWriter {
 
 impl Display for AztecWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut blocks = vec![(0usize, "██"); self.dominos.len()*4];
+        let mut blocks = vec![(0usize, "██"); self.size * self.size];
 
         let mut code = AztecCode::new(self.size);
 
