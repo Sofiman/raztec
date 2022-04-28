@@ -1,6 +1,6 @@
-use std::io::{self, Write, Error, ErrorKind};
-
-use crate::*;
+use std::io::{self, Write, Error, ErrorKind};
+
+use crate::*;
 
 #[derive(Debug)]
 struct Domino {
@@ -49,7 +49,7 @@ impl Domino {
         }
     }
 }
-
+
 pub struct AztecWriter {
     size: usize,
     dominos: Vec<Domino>,
@@ -57,26 +57,29 @@ pub struct AztecWriter {
 }
 
 impl AztecWriter {
-    pub fn new(aztec_code_size: usize) -> Self {
-        let end = aztec_code_size - 1;
-        let limit = end - 1;
-        let cap = aztec_code_size * aztec_code_size - 11 * 11;
-        let mut dominos = Vec::with_capacity(cap);
+    pub fn new(layers: usize) -> Self {
+        let aztec_code_size = layers * 4 + 11;
+        let mut dominos = Vec::new();
 
-        for row in 0..limit {
-            dominos.push(Domino::right((row, 0)))
-        }
+        for layer in 0..layers {
+            let start = 2 * layer;
+            let end = aztec_code_size - start - 1;
+            let limit = end - 1;
+            for row in 0..limit {
+                dominos.push(Domino::right((start + row, start)))
+            }
 
-        for col in 0..limit {
-            dominos.push(Domino::up((end, col)))
-        }
+            for col in 0..limit {
+                dominos.push(Domino::up((end, start +col)))
+            }
 
-        for row in 0..limit {
-            dominos.push(Domino::left((end - row, end)))
-        }
+            for row in 0..limit {
+                dominos.push(Domino::left((end - row, end)))
+            }
 
-        for col in 0..limit {
-            dominos.push(Domino::down((0, end - col)))
+            for col in 0..limit {
+                dominos.push(Domino::down((start, end - col)))
+            }
         }
 
         AztecWriter { size: aztec_code_size, dominos, current_domino: 0 }
@@ -114,7 +117,6 @@ impl Write for AztecWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let nb_dominos = buf.len() * 8 / 4;
         let remaining = self.dominos.len() - self.current_domino;
-        println!("Writing {} (remaining: {})", nb_dominos, remaining);
 
         if remaining < nb_dominos {
             return Ok(0)
