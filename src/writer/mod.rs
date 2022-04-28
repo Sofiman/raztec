@@ -53,24 +53,34 @@ impl Domino {
 pub struct AztecWriter {
     size: usize,
     dominos: Vec<Domino>,
+    codeword_size: usize,
     current_domino: usize
 }
 
 impl AztecWriter {
     pub fn new(layers: usize) -> Self {
-        let aztec_code_size = layers * 4 + 11;
+        let size = layers * 4 + 11;
         let mut dominos = Vec::new();
+
+        let codeword_size: usize = match layers {
+            1..=2 => 6,
+            3..=8 => 8,
+            9..=22 => 10,
+            23..=32 => 12,
+            _ => panic!("Too many layers")
+        };
 
         for layer in 0..layers {
             let start = 2 * layer;
-            let end = aztec_code_size - start - 1;
-            let limit = end - 1;
+            let end = size - start - 1;
+            let limit = end - start - 1;
+
             for row in 0..limit {
                 dominos.push(Domino::right((start + row, start)))
             }
 
             for col in 0..limit {
-                dominos.push(Domino::up((end, start +col)))
+                dominos.push(Domino::up((end, start + col)))
             }
 
             for row in 0..limit {
@@ -80,16 +90,16 @@ impl AztecWriter {
             for col in 0..limit {
                 dominos.push(Domino::down((start, end - col)))
             }
+
         }
 
-        AztecWriter { size: aztec_code_size, dominos, current_domino: 0 }
+        AztecWriter { size, dominos, codeword_size, current_domino: 0 }
     }
-    
+
     pub fn into_aztec(self) -> AztecCode {
         let mut code = AztecCode::new(self.size);
 
         for domino in &self.dominos {
-            println!("{:?}", domino);
             code[domino.head()] = domino.head;
             code[domino.tail()] = domino.tail;
         }
@@ -138,5 +148,38 @@ impl Write for AztecWriter {
 
     fn flush(&mut self) -> std::io::Result<()> {
        Ok(()) 
+    }
+}
+
+impl Display for AztecWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut blocks = vec![(0usize, "██"); self.dominos.len()*4];
+
+        let mut code = AztecCode::new(self.size);
+
+        for (i, domino) in self.dominos.iter().enumerate() {
+            let (row1, col1) = domino.head();
+            let (row2, col2) = domino.tail();
+            code[(row1, col1)] = domino.head;
+            code[(row2, col2)] = domino.tail;
+            let idx1 = row1 * self.size + col1;
+            let color = i % 8;
+            match domino.dir {
+                Direction::Right => blocks[idx1] = (color, "->"),
+                Direction::Up    => blocks[idx1] = (color, "^^"),
+                Direction::Left  => blocks[idx1] = (color, "<-"),
+                Direction::Down  => blocks[idx1] = (color, "vv"),
+            }
+            blocks[row2 * self.size + col2] = (color, "██");
+        }
+
+        for row in 0..self.size {
+            for col in 0..self.size {
+                let (color, chars) = blocks[row * code.size + col];
+                write!(f, "\x1b[9{}m{}", color, chars)?;
+            }
+            writeln!(f, "\x1b[0m")?;
+        }
+        Ok(())
     }
 }
