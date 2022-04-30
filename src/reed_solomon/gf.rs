@@ -1,7 +1,7 @@
 use std::{ops::{Add, Sub, Mul, Div}, fmt::Display};
-
-use super::poly::Polynomial;
+use super::{poly::Polynomial, gf_poly::GFPoly};
 
+#[derive(Debug, PartialEq)]
 pub struct GF {
     order: u8,
     size: usize,
@@ -48,6 +48,12 @@ impl GF {
             .map(|x| x.expect("Input Polynomial coefficients must be 0 or 1"))
             .fold(0, |acc, x| (acc << 1) + x);
         GFNum { val, gf: self }
+    }
+
+    pub fn to_gf_poly(&self, poly: Polynomial) -> GFPoly {
+        let coeffs: Vec<GFNum> = poly.iter()
+            .map(|&x| self.num(x as usize)).collect();
+        GFPoly::new(self, &coeffs)
     }
 
     pub fn size(&self) -> usize {
@@ -108,6 +114,7 @@ impl Display for GF {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct GFNum<'a> {
     gf: &'a GF,
     val: usize
@@ -128,6 +135,10 @@ impl<'a> GFNum<'a> {
 
     pub fn inv(self) -> GFNum<'a> {
         self.gf.inv(self)
+    }
+
+    pub fn zero(gf: &'a GF) -> GFNum<'a> {
+        GFNum { gf, val: 0 }
     }
 }
 

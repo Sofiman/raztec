@@ -1,6 +1,5 @@
 use std::io::{self, Write, Error, ErrorKind};
-
-use crate::*;
+use super::{*, reed_solomon::{ReedSolomonEncoder, poly::*}};
 
 #[derive(Debug)]
 struct Domino {
@@ -113,6 +112,10 @@ impl AztecWriter {
         ];
 
         /* reed_solomon */
+        let encoder = ReedSolomonEncoder::new(4, 0b10011, Polynomial::new(&[1, 2, 6, 4, 11, 1]));
+        let check_codes = encoder.generate_check_codes(&[0, 9], 5);
+        let mut data = data.to_vec();
+        data.extend(&check_codes);
 
         let mut i = 0;
         for b in data.iter() {
@@ -133,29 +136,11 @@ impl AztecWriter {
 
         code
     }
-
-    /*
-    fn reed_solomon(&self, data: &[usize; 2], nb_check: usize, gf: usize, pp: usize) 
-        -> Vec<usize> {
-        let data = vec![0; data.len() + nb_check];
-        let mut coefs = vec![0; data.len()];
-
-        // determine the coefficients of the polynomial
-        for (i, val) in data.iter().enumerate() {
-            coefs[i] = *val;
-        }
-        // coefs now contains coefficients of the polynomial [x^6, x^5]
-
-        // reminder of polynomial division
-        // get coefs and put it into data[data.len() + i] with i => 0..2
-
-        data
-    }*/
 }
 
 impl Write for AztecWriter {
 
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, _fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
         todo!();
     }
 
