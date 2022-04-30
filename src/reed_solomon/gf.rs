@@ -16,23 +16,18 @@ impl GF {
         let full_size = 2usize.pow(n as u32);
         let size = full_size - 1;
         let mut exp_table = vec![0; full_size];
+        let mut log_table = vec![0; full_size];
 
         let mut x = 1;
-        for val in exp_table.iter_mut() {
+        for (i, val) in exp_table.iter_mut().enumerate() {
             *val = x;
+            log_table[x] = i;
             x *= 2;
             if x > size {
                 x ^= primitive;
                 x &= size;
             }
         }
-        println!("{:?}", exp_table);
-
-        let mut log_table = vec![0; full_size];
-        for i in 0..size {
-            log_table[exp_table[i]] = i;
-        }
-        println!("{:?}", log_table);
 
         GF { order: n, size, primitive, exp_table, log_table }
     }
