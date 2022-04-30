@@ -2,26 +2,31 @@ pub mod gf;
 pub mod poly;
 pub mod gf_poly;
 
-use self::poly::Polynomial;
 use self::gf::{GF, GFNum};
 use self::gf_poly::GFPoly;
 
 pub struct ReedSolomonEncoder {
-    gf: GF,
-    generator: Polynomial
+    gf: GF
 }
 
 impl ReedSolomonEncoder {
-    pub fn new(m: u8, primitive: usize, generator: Polynomial) -> Self {
-        ReedSolomonEncoder { gf: GF::new(m, primitive), generator }
+    pub fn new(m: u8, primitive: usize) -> Self {
+        ReedSolomonEncoder { gf: GF::new(m, primitive) }
     }
 
     pub fn generate_check_codes(&self, data: &[u8], k: usize) -> Vec<u8> {
         let coeffs: Vec<GFNum> = data.iter()
             .map(|&x| self.gf.num(x as usize)).rev().collect();
         let poly = GFPoly::new(&self.gf, &coeffs) << k;
-        let gen = self.gf.to_gf_poly(self.generator.clone());
-        let (_, rem) = poly / gen;
+
+        let mut generator = GFPoly::new(&self.gf, &[self.gf.num(1)]);
+        for i in 1..=k {
+            let power = self.gf.exp2(self.gf.num(i));
+            let next = GFPoly::new(&self.gf, &[power, self.gf.num(1)]);
+            generator = generator * next;
+        }
+
+        let (_, rem) = poly / generator;
         rem.iter().take(k).rev().map(|&x| x.value() as u8).collect()
     }
 }

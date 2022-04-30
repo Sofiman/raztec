@@ -104,16 +104,13 @@ impl AztecWriter {
         }
 
         let mut service_message = [false; 28];
-        let count = (self.size - 11) / 4 - 1;
-        let codeword_count = (self.current_domino - 1) / self.codeword_size - 1;
-        let data = [
-            (count << 2) as u8 + (codeword_count & 3) as u8, 
-            (codeword_count >> 2) as u8
-        ];
+        let layers: u8 = ((self.size - 11) / 4 - 1) as u8;
+        let words = ((self.current_domino - 1) / self.codeword_size - 1) as u8;
+        let data = [(layers << 2) | ((words >> 4) & 3), words & 15];
 
         /* reed_solomon */
-        let encoder = ReedSolomonEncoder::new(4, 0b10011, Polynomial::new(&[1, 2, 6, 4, 11, 1]));
-        let check_codes = encoder.generate_check_codes(&[0, 9], 5);
+        let encoder = ReedSolomonEncoder::new(4, 0b10011);
+        let check_codes = encoder.generate_check_codes(&data, 5);
         let mut data = data.to_vec();
         data.extend(&check_codes);
 
@@ -172,6 +169,22 @@ impl Write for AztecWriter {
                 idx += 1;
             }
         }
+
+        /*
+        let layers = (self.size - 11) / 4;
+        let (gf, prim) = if layers < 3 { (6, 67) } else { (8, 301) };
+        let err = ReedSolomonEncoder::new(gf as u8, prim);
+        let check_words = err.generate_check_codes(buf, 7);
+        for byte in check_words {
+            for bit in (0..gf).step_by(2) {
+                let bit = gf - 2 - bit;
+                let mut domino = &mut self.dominos[idx];
+                domino.head = ((byte >> (bit + 1)) & 1) == 1;
+                domino.tail = ((byte >> bit)       & 1) == 1;
+                idx += 1;
+            }
+        }*/
+
         self.current_domino = idx;
 
         Ok(buf.len())
