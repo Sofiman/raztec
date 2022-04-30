@@ -1,5 +1,6 @@
 pub mod writer;
 pub mod reader;
+pub mod reed_solomon;
 use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 

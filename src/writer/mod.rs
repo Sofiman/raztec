@@ -107,12 +107,20 @@ impl AztecWriter {
         let mut service_message = [false; 28];
         let count = (self.size - 11) / 4 - 1;
         let codeword_count = (self.current_domino - 1) / self.codeword_size - 1;
-        service_message[0] = count & 2 == 2;
-        service_message[1] = count & 1 == 1;
-        for i in 0..6 {
-            service_message[2 + 5 - i] = (codeword_count >> i) & 1 == 1;
+        let data = [
+            (count << 2) as u8 + (codeword_count & 3) as u8, 
+            (codeword_count >> 2) as u8
+        ];
+
+        /* reed_solomon */
+
+        let mut i = 0;
+        for b in data.iter() {
+            for j in 0..4 {
+                service_message[i + 3 - j] = (b >> j) & 1 == 1;
+            }
+            i += 4;
         }
-        //self.error_correction(&mut service_message, (count << 6) + codeword_count);
 
         let middle = self.size / 2;
         let start_idx = middle - 5;
@@ -126,24 +134,29 @@ impl AztecWriter {
         code
     }
 
-    fn error_correction(&self, code: &mut [bool], codewords: usize) {
-        let middle = self.size / 2;
-        let col = middle + 5;
+    /*
+    fn reed_solomon(&self, data: &[usize; 2], nb_check: usize, gf: usize, pp: usize) 
+        -> Vec<usize> {
+        let data = vec![0; data.len() + nb_check];
+        let mut coefs = vec![0; data.len()];
 
-        let control1 = 0b1010;
-        let control2 = 0b1010;
-        let control3 = 0b1010;
-        let control4 = 0b1010;
-        let control5 = 0b1010;
+        // determine the coefficients of the polynomial
+        for (i, val) in data.iter().enumerate() {
+            coefs[i] = *val;
+        }
+        // coefs now contains coefficients of the polynomial [x^6, x^5]
 
-        todo!();
-    }
+        // reminder of polynomial division
+        // get coefs and put it into data[data.len() + i] with i => 0..2
+
+        data
+    }*/
 }
 
 impl Write for AztecWriter {
 
     fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
-        self.write_all(fmt.to_string().as_bytes())
+        todo!();
     }
 
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
