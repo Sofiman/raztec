@@ -25,5 +25,5 @@ fn test_generate_check_codes3(){
 fn test_generate_check_codes4(){
     let encoder = ReedSolomonEncoder::new(4, 0b10011);
     let check_codes = encoder.generate_check_codes(&[0b1111, 0b0000], 5);
-    assert_eq!(check_codes, [0b0111, 0b1000, 0b0011, 0b1100, 0b1011]);
+    assert_eq!(check_codes, [0b0111, 0b1000, 0b0111, 0b1001, 0b0011]);
 }

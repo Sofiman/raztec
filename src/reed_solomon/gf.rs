@@ -33,7 +33,7 @@ impl GF {
     }
 
     pub fn num(&self, val: usize) -> GFNum {
-        GFNum { gf: self, val: val % self.size }
+        GFNum { gf: self, val: val % (self.size + 1) }
     }
 
     pub fn poly(&self, poly: Polynomial) -> GFNum {
@@ -183,5 +183,11 @@ impl<'a> Div for GFNum<'a> {
             panic!("Attempt to use finite field arithmetic on values from different fields");
         }
         self.gf.div(self, rhs)
+    }
+}
+
+impl Display for GFNum<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.val)
     }
 }
