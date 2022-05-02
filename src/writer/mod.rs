@@ -51,13 +51,13 @@ impl Domino {
 struct AztecWriter {
     size: usize,
     dominos: Vec<Domino>,
-    codeword_size: usize,
+    codewords: usize,
     current_domino: usize,
     current_bit: bool
 }
 
 impl AztecWriter {
-    fn new(codeword_size: usize, layers: usize) -> Self {
+    fn new(codewords: usize, layers: usize) -> Self {
         let size = layers * 4 + 11;
         let mut dominos = Vec::new();
 
@@ -84,8 +84,9 @@ impl AztecWriter {
 
         }
 
-        AztecWriter { size, dominos, codeword_size, current_domino: 1,
-        current_bit: false }
+        AztecWriter { 
+            size, dominos, codewords, current_domino: 1, current_bit: false
+        }
     }
 
     fn fill(&mut self, bitstr: &[bool]) {
@@ -113,7 +114,7 @@ impl AztecWriter {
 
         let mut service_message = [false; 28];
         let layers: u8 = ((self.size - 11) / 4 - 1) as u8;
-        let words = ((self.current_domino - 1) / self.codeword_size - 1) as u8;
+        let words = self.codewords as u8 - 1;
         let data = [(layers << 2) | ((words >> 4) & 3), words & 15];
 
         /* reed_solomon */
@@ -245,12 +246,15 @@ impl Word {
 pub struct AztecCodeBuilder {
     current_mode: Mode,
     words: Vec<Word>,
-    compression: u8
+    compression: usize
 }
 
 impl AztecCodeBuilder {
 
-    pub fn new(compression: u8) -> AztecCodeBuilder {
+    pub fn new(compression: usize) -> AztecCodeBuilder {
+        if !(0..100).contains(&compression) {
+            panic!("Invalid compression percentage");
+        }
         AztecCodeBuilder {
             current_mode: Mode::Upper, words: Vec::new(), compression
         }
@@ -346,31 +350,64 @@ impl AztecCodeBuilder {
         }
     }
 
-    fn add_padding(&self, bitstr: &mut Vec<bool>) {
-        todo!("add_padding");
+    fn add_padding(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
+        let remaining = bitstr.len() % codeword_size;
+        if remaining == 0 {
+            return;
+        }
+        let remaining = codeword_size - remaining;
+        for _i in 0..remaining {
+            bitstr.push(true);
+        }
     }
 
-    fn find_nb_layers(&self, total_bits: usize) -> usize {
+    fn find_nb_layers(&self, total_bits: usize) -> (usize, usize) {
         let mut layers = 1;
         while (88 + 16 * layers) * layers < total_bits {
             layers += 1;
         }
-        layers
+        (layers, (88 + 16 * layers) * layers)
+    }
+
+    fn to_words(&self, bitstr: &[bool], size: usize) -> Vec<u8> {
+        let l = bitstr.len();
+        let mut bytes = Vec::with_capacity(l / size);
+        for i in (0..=(l - size)).step_by(size) {
+            let mut val = 0;
+            for j in 0..size {
+                val <<= 1;
+                val |= bitstr[i + j] as u8;
+            }
+            bytes.push(val);
+        }
+        bytes
     }
 
     pub fn build(self) -> AztecCode {
         let mut bitstr = self.to_bit_string();
-        let layers = self.find_nb_layers(bitstr.len());
-        let codeword_size: usize = match layers {
-            1..=2 => 3,
-            3..=8 => 4,
-            //9..=22 => 5,
-            //23..=32 => 6,
+        let (layers, bits_in_layers) = self.find_nb_layers(bitstr.len() + 
+            bitstr.len() * self.compression / 100);
+        let (codeword_size, prim) = match layers {
+            1..=2 => (6, 0b1000011),
+            3..=8 => (8, 0b100101101),
+            //9..=22 => (10, 0b10000001001),
+            //23..=32 => (12, 0b1000001101001),
             _ => panic!("Aztec code with {} layers is not supported", layers)
         };
-        self.bit_stuffing(&mut bitstr, codeword_size * 2);
-        self.add_padding(&mut bitstr);
-        let mut writer = AztecWriter::new(codeword_size, layers);
+        self.bit_stuffing(&mut bitstr, codeword_size);
+        self.add_padding(&mut bitstr, codeword_size);
+        let words = self.to_words(&bitstr, codeword_size);
+
+        let codewords = bitstr.len() / codeword_size;
+        let to_fill = (bits_in_layers - bitstr.len()) / codeword_size;
+        let rs = ReedSolomonEncoder::new(codeword_size as u8, prim);
+
+        let check_words = rs.generate_check_codes(&words, to_fill);
+        for check_word in check_words {
+            self.append_bits(&mut bitstr, check_word, codeword_size as u8);
+        }
+
+        let mut writer = AztecWriter::new(codewords, layers);
         writer.fill(&bitstr);
         writer.into_aztec()
     }
