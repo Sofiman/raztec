@@ -84,8 +84,9 @@ impl AztecWriter {
 
         }
 
+        let start = if layers == 1 { 1 } else { 0 };
         AztecWriter { 
-            size, dominos, codewords, current_domino: 1, current_bit: false
+            size, dominos, codewords, current_domino: start, current_bit: false
         }
     }
 
@@ -177,17 +178,13 @@ impl Display for AztecWriter {
     }
 }
 
-fn c5(first: usize, second: usize) -> usize {
-    (first << 5) | second
-}
-
 const SWITCH_TABLE: [usize; 25] = [
 // From  | To:   Upper      Lower      Mixed   Punct     Digit
 /* Upper */       255,        28,        29,     0,         30,
 /* Lower */(29<<5)|29,       255,        29,     0,         30,
-/* Mixed */        29,        28,       255,     0, (29<<5)|30,
-/* Punct */        31,(31<<5)|28,(31<<5)|29,   255, (31<<5)|30,
-/* Digit */        14,(14<<5)|28,(14<<5)|29, 14<<5,        255,
+/* Mixed */        29,        28,       255,     0, (30<<5)|29,
+/* Punct */        31,(28<<5)|31,(29<<5)|31,   255, (30<<5)|31,
+/* Digit */        14,(28<<5)|14,(29<<5)|14, 14<<5,        255,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -315,7 +312,9 @@ impl AztecCodeBuilder {
             to_add.push(Word::new(expected_mode, code as u8));
             //println!("pushing {:?}", to_add);
             self.words.append(&mut to_add);
-            self.current_mode = expected_mode;
+            if expected_mode != Mode::Punctuation {
+                self.current_mode = expected_mode;
+            }
             //println!("now in {:?}", self.current_mode);
         }
         self.words.push(word);
@@ -394,8 +393,10 @@ impl AztecCodeBuilder {
         bytes
     }
 
-    pub fn build(self) -> AztecCode {
+    pub fn build(&self) -> AztecCode {
         let mut bitstr = self.to_bit_string();
+
+        // reed_solomon config
         let (layers, bits_in_layers) = self.find_nb_layers(bitstr.len() + 
             bitstr.len() * self.compression / 100);
         let (codeword_size, prim) = match layers {
@@ -405,6 +406,7 @@ impl AztecCodeBuilder {
             //23..=32 => (12, 0b1000001101001),
             _ => panic!("Aztec code with {} layers is not supported", layers)
         };
+
         self.bit_stuffing(&mut bitstr, codeword_size);
         self.add_padding(&mut bitstr, codeword_size);
         let words = self.to_words(&bitstr, codeword_size);
