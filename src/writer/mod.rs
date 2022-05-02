@@ -1,5 +1,4 @@
-use std::io::{self, Write, Error, ErrorKind};
-use super::{*, reed_solomon::{ReedSolomonEncoder, poly::*}};
+use super::{*, reed_solomon::ReedSolomonEncoder};
 
 #[derive(Debug)]
 struct Domino {
@@ -49,25 +48,18 @@ impl Domino {
     }
 }
 
-pub struct AztecWriter {
+struct AztecWriter {
     size: usize,
     dominos: Vec<Domino>,
     codeword_size: usize,
-    current_domino: usize
+    current_domino: usize,
+    current_bit: bool
 }
 
 impl AztecWriter {
-    pub fn new(layers: usize) -> Self {
+    fn new(codeword_size: usize, layers: usize) -> Self {
         let size = layers * 4 + 11;
         let mut dominos = Vec::new();
-
-        let codeword_size: usize = match layers {
-            1..=2 => 3,
-            3..=8 => 4,
-            //9..=22 => 5,
-            //23..=32 => 6,
-            _ => panic!("Aztec code with {} layers is not supported", layers)
-        };
 
         for layer in 0..layers {
             let start = 2 * layer;
@@ -92,10 +84,26 @@ impl AztecWriter {
 
         }
 
-        AztecWriter { size, dominos, codeword_size, current_domino: 1 }
+        AztecWriter { size, dominos, codeword_size, current_domino: 1,
+        current_bit: false }
     }
 
-    pub fn into_aztec(self) -> AztecCode {
+    fn fill(&mut self, bitstr: &[bool]) {
+        let mut idx = self.current_domino;
+        for &bit in bitstr {
+            let mut domino = &mut self.dominos[idx];
+            if self.current_bit {
+                domino.tail = bit;
+                idx += 1;
+            } else {
+                domino.head = bit;
+            }
+            self.current_bit = !self.current_bit;
+        }
+        self.current_domino = idx;
+    }
+
+    fn into_aztec(self) -> AztecCode {
         let mut code = AztecCode::new(self.size);
 
         for domino in &self.dominos {
@@ -135,66 +143,6 @@ impl AztecWriter {
     }
 }
 
-impl Write for AztecWriter {
-
-    fn write_fmt(&mut self, _fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
-        todo!();
-    }
-
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        let result = self.write(buf);
-        if let Ok(written) = result {
-            if written == 0 {
-                return Err(Error::new(ErrorKind::WriteZero, "Not enough space left"))
-            }
-        }
-        Ok(())
-    }
-
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let nb_dominos = buf.len() * 8 / 2;
-        let remaining = self.dominos.len() - self.current_domino;
-
-        if remaining < nb_dominos {
-            return Ok(0)
-        }
-
-        let mut idx = self.current_domino;
-        for byte in buf {
-            for bit in (0..8).step_by(2) {
-                let bit = 6 - bit;
-                let mut domino = &mut self.dominos[idx];
-                domino.head = ((byte >> (bit + 1)) & 1) == 1;
-                domino.tail = ((byte >> bit)       & 1) == 1;
-                idx += 1;
-            }
-        }
-
-        /*
-        let layers = (self.size - 11) / 4;
-        let (gf, prim) = if layers < 3 { (6, 67) } else { (8, 301) };
-        let err = ReedSolomonEncoder::new(gf as u8, prim);
-        let check_words = err.generate_check_codes(buf, 7);
-        for byte in check_words {
-            for bit in (0..gf).step_by(2) {
-                let bit = gf - 2 - bit;
-                let mut domino = &mut self.dominos[idx];
-                domino.head = ((byte >> (bit + 1)) & 1) == 1;
-                domino.tail = ((byte >> bit)       & 1) == 1;
-                idx += 1;
-            }
-        }*/
-
-        self.current_domino = idx;
-
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-       Ok(()) 
-    }
-}
-
 impl Display for AztecWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut blocks = vec![(0usize, "██"); self.size * self.size];
@@ -225,5 +173,205 @@ impl Display for AztecWriter {
             writeln!(f, "\x1b[0m")?;
         }
         Ok(())
+    }
+}
+
+const SWITCH_TABLE: [usize; 25] = [
+// From  | To: Upper Lower Mixed Punct Digit
+/* Upper */    255,   28,   29,    0,   30,
+/* Lower */ 29 * 2,  255,   29,    0,   30,
+/* Mixed */     29,   28,  255,    0,29+30,
+/* Punct */     31,31+28,31+29,  255,31+30,
+/* Digit */     14,14+28,14+29, 14+0,  255,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Mode {
+    Upper,
+    Lower,
+    Mixed,
+    Punctuation,
+    Digit,
+    Binary
+}
+
+impl Mode {
+    fn val(&self) -> usize {
+        match self {
+            Mode::Upper => 0,
+            Mode::Lower => 1,
+            Mode::Mixed => 2,
+            Mode::Punctuation => 3,
+            Mode::Digit => 4,
+            Mode::Binary => 5
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Word {
+    Char(u8),
+    Punc(u8),
+    Mixed(u8),
+    Digit(u8),
+    Byte(u8)
+}
+
+impl Word {
+    fn new(kind: Mode, c: u8) -> Self {
+        match kind {
+            Mode::Upper | Mode::Lower => Word::Char(c),
+            Mode::Mixed => Word::Char(c),
+            Mode::Digit => Word::Digit(c),
+            Mode::Punctuation => Word::Punc(c),
+            Mode::Binary => Word::Byte(c)
+        }
+    }
+
+    fn upper_letter(c: char) -> Self {
+        Word::Char(c as u8 - 65 + 2)
+    }
+
+    fn lower_letter(c: char) -> Self {
+        Word::Char(c as u8 - 97 + 2)
+    }
+
+    fn digit(c: char) -> Self {
+        Word::Digit(c as u8 - 48 + 2)
+    }
+}
+
+
+pub struct AztecCodeBuilder {
+    current_mode: Mode,
+    words: Vec<Word>,
+    compression: u8
+}
+
+impl AztecCodeBuilder {
+
+    pub fn new(compression: u8) -> AztecCodeBuilder {
+        AztecCodeBuilder {
+            current_mode: Mode::Upper, words: Vec::new(), compression
+        }
+    }
+
+    pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
+        for c in text.chars() {
+            println!("Processing '{}'", c);
+            let (word, mode) = match c as u8 {
+                65..=90 => (Word::upper_letter(c), Mode::Upper),
+                97..=122 => (Word::lower_letter(c), Mode::Lower),
+                48..=57 => (Word::digit(c), Mode::Digit),
+                33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
+                58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
+                91 => (Word::Punc(27), Mode::Punctuation), // [
+                93 => (Word::Punc(28), Mode::Punctuation), // ]
+                123 => (Word::Punc(29), Mode::Punctuation), // {
+                125 => (Word::Punc(30), Mode::Punctuation), // } 
+                64 => (Word::Mixed(20), Mode::Mixed), // @
+                92 => (Word::Mixed(21), Mode::Mixed), // \
+                94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
+                126 => (Word::Mixed(26), Mode::Mixed), // ~
+                _ => continue
+            };
+            self.push_in(word, mode);
+        }
+        self
+    }
+
+    fn push_in(&mut self, word: Word, expected_mode: Mode) {
+        if self.current_mode != expected_mode {
+            let idx = self.current_mode.val() * 6 + expected_mode.val();
+            println!("switching from {:?} to {}", self.current_mode, idx);
+            let mut code = SWITCH_TABLE[idx];
+            let mut to_add = Vec::new();
+            let (limit, shift) = 
+                if self.current_mode == Mode::Digit { 
+                    (15, 4) 
+                } else { 
+                    (31, 5) 
+                };
+            while code > limit {
+                to_add.push(Word::new(self.current_mode, (code & limit) as u8));
+                code >>= shift;
+            }
+            to_add.push(Word::new(expected_mode, code as u8));
+            self.words.append(&mut to_add);
+            if expected_mode != Mode::Punctuation {
+                self.current_mode = expected_mode;
+            }
+            println!("now in {:?}", self.current_mode);
+        }
+        self.words.push(word);
+    }
+
+    fn append_bits(&self, bitstr: &mut Vec<bool>, byte: u8, bits: u8)  {
+        for bit in 0..bits {
+            let bit = bits - 1 - bit;
+            bitstr.push(((byte >> bit) & 1) == 1);
+        }
+    }
+
+    fn to_bit_string(&self) -> Vec<bool> {
+        let mut bitstr = Vec::new();
+
+        for &word in self.words.iter() {
+            match word {
+                Word::Byte(x) => self.append_bits(&mut bitstr, x, 8),
+                Word::Digit(x) => self.append_bits(&mut bitstr, x, 4),
+                Word::Char(x) | Word::Punc(x) | Word::Mixed(x) 
+                    => self.append_bits(&mut bitstr, x, 5),
+            }
+        }
+        bitstr
+    }
+
+    fn bit_stuffing(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
+        let mut i = 0;
+        let mut l = bitstr.len() - codeword_size;
+        let limit = codeword_size - 1;
+        while i < l {
+            let first = bitstr[i];
+            let mut j = 1;
+            while j < codeword_size && bitstr[i + j] == first {
+                j += 1;
+            }
+            if j == codeword_size {
+                bitstr.insert(i + limit, !first);
+                i += 1;
+                l += 1;
+            }
+            i += codeword_size;
+        }
+    }
+
+    fn add_padding(&self, bitstr: &mut Vec<bool>) {
+        todo!("add_padding");
+    }
+
+    fn find_nb_layers(&self, total_bits: usize) -> usize {
+        let mut layers = 1;
+        while (88 + 16 * layers) * layers < total_bits {
+            layers += 1;
+        }
+        layers
+    }
+
+    pub fn build(self) -> AztecCode {
+        let mut bitstr = self.to_bit_string();
+        let layers = self.find_nb_layers(bitstr.len());
+        let codeword_size: usize = match layers {
+            1..=2 => 3,
+            3..=8 => 4,
+            //9..=22 => 5,
+            //23..=32 => 6,
+            _ => panic!("Aztec code with {} layers is not supported", layers)
+        };
+        self.bit_stuffing(&mut bitstr, codeword_size * 2);
+        self.add_padding(&mut bitstr);
+        let mut writer = AztecWriter::new(codeword_size, layers);
+        writer.fill(&bitstr);
+        writer.into_aztec()
     }
 }
