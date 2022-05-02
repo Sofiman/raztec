@@ -177,13 +177,17 @@ impl Display for AztecWriter {
     }
 }
 
+fn c5(first: usize, second: usize) -> usize {
+    (first << 5) | second
+}
+
 const SWITCH_TABLE: [usize; 25] = [
-// From  | To: Upper Lower Mixed Punct Digit
-/* Upper */    255,   28,   29,    0,   30,
-/* Lower */ 29 * 2,  255,   29,    0,   30,
-/* Mixed */     29,   28,  255,    0,29+30,
-/* Punct */     31,31+28,31+29,  255,31+30,
-/* Digit */     14,14+28,14+29, 14+0,  255,
+// From  | To:   Upper      Lower      Mixed   Punct     Digit
+/* Upper */       255,        28,        29,     0,         30,
+/* Lower */(29<<5)|29,       255,        29,     0,         30,
+/* Mixed */        29,        28,       255,     0, (29<<5)|30,
+/* Punct */        31,(31<<5)|28,(31<<5)|29,   255, (31<<5)|30,
+/* Digit */        14,(14<<5)|28,(14<<5)|29, 14<<5,        255,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -262,7 +266,7 @@ impl AztecCodeBuilder {
 
     pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
         for c in text.chars() {
-            println!("Processing '{}'", c);
+            //println!("Processing '{}'", c);
             let (word, mode) = match c as u8 {
                 65..=90 => (Word::upper_letter(c), Mode::Upper),
                 97..=122 => (Word::lower_letter(c), Mode::Lower),
@@ -277,6 +281,14 @@ impl AztecCodeBuilder {
                 92 => (Word::Mixed(21), Mode::Mixed), // \
                 94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
                 126 => (Word::Mixed(26), Mode::Mixed), // ~
+                10 => (Word::Punc(1), Mode::Punctuation), // \n
+                32 => {
+                    if self.current_mode != Mode::Punctuation {
+                        (Word::new(self.current_mode, 1), self.current_mode)
+                    } else {
+                        (Word::Char(1), Mode::Upper)
+                    }
+                },
                 _ => continue
             };
             self.push_in(word, mode);
@@ -286,8 +298,8 @@ impl AztecCodeBuilder {
 
     fn push_in(&mut self, word: Word, expected_mode: Mode) {
         if self.current_mode != expected_mode {
-            let idx = self.current_mode.val() * 6 + expected_mode.val();
-            println!("switching from {:?} to {}", self.current_mode, idx);
+            let idx = self.current_mode.val() * 5 + expected_mode.val();
+            //println!("switching from {:?} with idx {}", self.current_mode, idx);
             let mut code = SWITCH_TABLE[idx];
             let mut to_add = Vec::new();
             let (limit, shift) = 
@@ -301,11 +313,10 @@ impl AztecCodeBuilder {
                 code >>= shift;
             }
             to_add.push(Word::new(expected_mode, code as u8));
+            //println!("pushing {:?}", to_add);
             self.words.append(&mut to_add);
-            if expected_mode != Mode::Punctuation {
-                self.current_mode = expected_mode;
-            }
-            println!("now in {:?}", self.current_mode);
+            self.current_mode = expected_mode;
+            //println!("now in {:?}", self.current_mode);
         }
         self.words.push(word);
     }
