@@ -1,4 +1,4 @@
-use raztec::{self, writer::AztecCodeBuilder};
+use raztec::writer::AztecCodeBuilder;
 
 fn main() {
     /*let code = AztecCodeBuilder::new(23)

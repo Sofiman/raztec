@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 
 pub struct AztecCode {
-    pub size: usize,
+    size: usize,
     image: Vec<bool>
 }
 
@@ -48,6 +48,10 @@ impl AztecCode {
         for px in self.image.iter_mut() {
             *px = !*px;
         }
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
     }
 }
 
