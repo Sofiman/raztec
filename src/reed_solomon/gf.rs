@@ -36,7 +36,7 @@ impl GF {
         GFNum { gf: self, val: val % (self.size + 1) }
     }
 
-    pub fn poly(&self, poly: Polynomial) -> GFNum {
+    pub fn from_poly(&self, poly: Polynomial) -> GFNum {
         let val = poly.iter()
             .map(|&x| {
                 if x != 0 && x != 1 {
@@ -64,7 +64,7 @@ impl GF {
         self.order
     }
 
-    pub fn as_poly(&self, x: usize) -> Polynomial {
+    pub fn get_poly(&self, x: usize) -> Polynomial {
         let x = x as isize;
         let coeffs: Vec<isize> =
             (0..(self.order as isize)).map(|p| (x >> p) & 1).collect();
@@ -110,7 +110,7 @@ impl GF {
 impl Display for GF {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "GF(size: {}, primitive: {})", 
-            self.size, self.as_poly(self.primitive))
+            self.size, self.get_poly(self.primitive))
     }
 }
 
@@ -130,7 +130,7 @@ impl<'a> GFNum<'a> {
     }
 
     pub fn as_poly(&self) -> Polynomial {
-        self.gf.as_poly(self.val)
+        self.gf.get_poly(self.val)
     }
 
     pub fn inv(self) -> GFNum<'a> {
