@@ -270,7 +270,8 @@ impl AztecCodeBuilder {
     }
 
     pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
-        for c in text.chars() {
+        let chars: Vec<char> = text.chars().collect();
+        for c in chars {
             let (word, mode) = match c as u8 {
                 65..=90 => (Word::upper_letter(c), Mode::Upper),
                 97..=122 => (Word::lower_letter(c), Mode::Lower),
@@ -365,18 +366,16 @@ impl AztecCodeBuilder {
 
     fn bit_stuffing(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
         let mut i = 0;
-        let mut l = bitstr.len() - codeword_size;
+        let l = bitstr.len() - codeword_size;
         let limit = codeword_size - 1;
         while i < l {
             let first = bitstr[i];
             let mut j = 1;
-            while j < codeword_size && bitstr[i + j] == first {
+            while j < limit && bitstr[i + j] == first {
                 j += 1;
             }
-            if j == codeword_size {
+            if j == limit {
                 bitstr.insert(i + limit, !first);
-                i += 1;
-                l += 1;
             }
             i += codeword_size;
         }
@@ -445,5 +444,22 @@ impl AztecCodeBuilder {
         let mut writer = AztecWriter::new(codewords, layers);
         writer.fill(&bitstr);
         writer.into_aztec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bit_stuffing() {
+        let input    = "00100111001000000101001101111000010100111100101000000110";
+        let expected = "0010011100100000011010011011110000101001111001010000010110";
+        let mut bitstr:Vec<bool> = input.chars().map(|x| x == '1').collect();
+        let builder = AztecCodeBuilder::new(23);
+        builder.bit_stuffing(&mut bitstr, 6);
+
+        let result = bitstr.iter().fold(String::new(), |acc, &x| acc + if x { "1" } else { "0" });
+        assert_eq!(expected, result);
     }
 }
