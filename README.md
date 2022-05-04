@@ -10,8 +10,8 @@ should be fast and accurate.
 The Aztec code generator comes as a Builder:
 ```Rust
 use raztec::writer::AztecCodeBuilder;
-let code = AztecCodeBuilder::new(23)
-        .append("Hello").append(", ").append("World!").build(); // AztecCode
+let code = AztecCodeBuilder::new().error_correction(23)
+    .append("Hello").append(", ").append("World!").build();
 ```
 This gives you an AztecCode struct that have the Index IndexMut and Display
 traits. You can get the current side size with `code.size()`.
@@ -20,26 +20,4 @@ There is currently no builtin Aztec code reader.
 
 ### Generated using raztec
 
-```
-██████████████████████████████████████████
-██  ████████          ██  ████████████████
-██  ██  ██      ██  ██████  ████    ██  ██
-████      ██    ████  ██  ████          ██
-██    ██        ██  ██      ████████  ████
-████████      ██  ████      ██  ████  ████
-████████                        ████    ██
-████  ████    ██████████████            ██
-████    ████  ██          ██  ██      ████
-██  ██████    ██  ██████  ██  ██        ██
-██  ██  ████  ██  ██  ██  ██    ██  ██████
-████████████  ██  ██████  ██  ████  ██████
-████████      ██          ██    ██    ████
-██  ████      ██████████████    ██████████
-██  ██    ██                        ██████
-████    ██████    ██  ██████████      ████
-████      ████  ██  ██        ██    ██████
-████  ████████  ██      ██████  ██      ██
-████████████████  ██  ██████        ██████
-████████  ██  ████  ██  ██    ██  ██  ████
-██████████████████████████████████████████
-```
+![Example Aztec Code](https://i.imgur.com/HmgLg70.png)
