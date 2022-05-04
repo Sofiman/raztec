@@ -312,7 +312,6 @@ impl AztecCodeBuilder {
             };
             self.push_in(word, mode);
         }
-        println!("{:?}", self.words);
         self
     }
 
@@ -386,9 +385,21 @@ impl AztecCodeBuilder {
         if remaining == 0 {
             return;
         }
+
+        // pad the last bits by 1s to next codeword boundary
         let remaining = codeword_size - remaining;
         for _i in 0..remaining {
             bitstr.push(true);
+        }
+
+        // check if the last codeword is all ones to do one bit stuffing
+        let len = bitstr.len();
+        let mut i = len - codeword_size;
+        while i < len && bitstr[i] {
+            i += 1;
+        }
+        if i == len {
+            bitstr[i - 1] = false;
         }
     }
 
