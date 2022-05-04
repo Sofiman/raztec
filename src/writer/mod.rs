@@ -233,7 +233,8 @@ enum Word {
     Punc(u8),
     Mixed(u8),
     Digit(u8),
-    Byte(u8)
+    Byte(u8),
+    Size(u16)
 }
 
 impl Word {
@@ -269,6 +270,7 @@ pub struct AztecCodeBuilder {
 
 impl AztecCodeBuilder {
 
+    /// Creates an AztecCodeBuilder with a default error correction rate of 23%
     pub fn new() -> AztecCodeBuilder {
         AztecCodeBuilder {
             current_mode: Mode::Upper, words: Vec::new(), ecr: 23
@@ -282,6 +284,40 @@ impl AztecCodeBuilder {
             panic!("Invalid error correction rate (0-100)");
         }
         self.ecr = rate;
+        self
+    }
+
+    /// Appends byte slice to the Aztec Code according to the Aztec Code
+    /// Specification. This method only accepts byte slices up to 2079 bytes
+    /// (31 + 2^11). Note that if the length of the byte slice is between 32
+    /// and 62 bytes, two binary blocks are generated instead of a big one as
+    /// it is more space efficient.
+    pub fn append_bytes(&mut self, bytes: &[u8]) -> &mut AztecCodeBuilder {
+        let len = bytes.len();
+        if len == 0 {
+            return self;
+        }
+
+        if (32..=62).contains(&len) {
+            // Two 5-bit byte shift sequences are more compact than one 11-bit.
+            self.append_bytes(&bytes[0..31]);
+            return self.append_bytes(&bytes[32..]);
+        }
+
+        // shift to Binary mode
+        if self.current_mode == Mode::Punctuation {
+            self.words.push(Word::Char(31)); // switch to Upper Mode (no B/S)
+            self.current_mode = Mode::Upper;
+        }
+        self.words.push(Word::Char(31));
+
+        if (1..=31).contains(&len) {
+            self.words.push(Word::Char(len as u8));
+        } else {
+            self.words.push(Word::Char(0));
+            self.words.push(Word::Size((len - 31) as u16));
+        }
+        self.words.extend(bytes.iter().map(|&x| Word::Byte(x)));
         self
     }
 
@@ -404,6 +440,10 @@ impl AztecCodeBuilder {
 
         for &word in self.words.iter() {
             match word {
+                Word::Size(len) => {
+                    self.append_bits(&mut bitstr, (len >> 8) as u8, 3);
+                    self.append_bits(&mut bitstr, (len & 255) as u8, 8);
+                },
                 Word::Byte(x) => self.append_bits(&mut bitstr, x, 8),
                 Word::Digit(x) => self.append_bits(&mut bitstr, x, 4),
                 Word::Char(x) | Word::Punc(x) | Word::Mixed(x) 

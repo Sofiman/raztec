@@ -9,7 +9,9 @@ fn main() {
         .unwrap();
     let start = Instant::now();
     let code = AztecCodeBuilder::new()
-        .append(input.trim()).build();
+        .append("buffer: [")
+        .append_bytes(input.trim().as_bytes())
+        .append("]").build();
     /*
     let code = AztecCodeBuilder::new().error_correction(23)
         .append("Hello").append(", ").append("World! 0123456789").build();
