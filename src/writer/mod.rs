@@ -180,11 +180,11 @@ impl Display for AztecWriter {
 
 const LATCH_TABLE: [usize; 25] = [
 // From  | To:   Upper      Lower      Mixed   Punct     Digit
-/* Upper */       255,        28,        29,     0,         30,
-/* Lower */(29<<5)|29,       255,        29,     0,         30,
-/* Mixed */        29,        28,       255,     0, (30<<5)|29,
-/* Punct */        31,(28<<5)|31,(29<<5)|31,   255, (30<<5)|31,
-/* Digit */        14,(28<<4)|14,(29<<4)|14, 14<<4,        255,
+/* Upper */     32767,        28,        29,     0,         30,
+/* Lower */(29<<5)|29,     32767,        29,     0,         30,
+/* Mixed */        29,        28,     32767,     0, (30<<5)|29,
+/* Punct */        31,(28<<5)|31,(29<<5)|31, 32767, (30<<5)|31,
+/* Digit */        14,(28<<4)|14,(29<<4)|14, 14<<4,      32767,
 ];
 
 const SHIFT_TABLE: [usize; 25] = [
@@ -202,8 +202,7 @@ enum Mode {
     Lower,
     Mixed,
     Punctuation,
-    Digit,
-    Binary
+    Digit
 }
 
 impl Mode {
@@ -214,14 +213,12 @@ impl Mode {
             Mode::Mixed => 2,
             Mode::Punctuation => 3,
             Mode::Digit => 4,
-            Mode::Binary => 5
         }
     }
 
     fn capacity(&self) -> (usize, usize) {
         match self {
             Mode::Digit => (15, 4),
-            Mode::Binary => (255, 8),
             _ => (31, 5)
         }
     }
@@ -243,8 +240,7 @@ impl Word {
             Mode::Upper | Mode::Lower => Word::Char(c),
             Mode::Mixed => Word::Char(c),
             Mode::Digit => Word::Digit(c),
-            Mode::Punctuation => Word::Punc(c),
-            Mode::Binary => Word::Byte(c)
+            Mode::Punctuation => Word::Punc(c)
         }
     }
 

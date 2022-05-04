@@ -21,3 +21,9 @@ There is currently no builtin Aztec code reader.
 ### Generated using raztec
 
 ![Example Aztec Code](https://i.imgur.com/HmgLg70.png)
+
+## TODO
+
+- Add support for larger Aztec Codes (full-size)
+- Add support for ECI characters
+- Implement an Aztec code reader
