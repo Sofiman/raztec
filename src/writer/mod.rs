@@ -178,13 +178,22 @@ impl Display for AztecWriter {
     }
 }
 
-const SWITCH_TABLE: [usize; 25] = [
+const LATCH_TABLE: [usize; 25] = [
 // From  | To:   Upper      Lower      Mixed   Punct     Digit
 /* Upper */       255,        28,        29,     0,         30,
 /* Lower */(29<<5)|29,       255,        29,     0,         30,
 /* Mixed */        29,        28,       255,     0, (30<<5)|29,
 /* Punct */        31,(28<<5)|31,(29<<5)|31,   255, (30<<5)|31,
 /* Digit */        14,(28<<4)|14,(29<<4)|14, 14<<4,        255,
+];
+
+const SHIFT_TABLE: [usize; 25] = [
+// From  | To:   Upper      Lower      Mixed   Punct     Digit
+/* Upper */     32767,     32767,     32767,     0,      32767,
+/* Lower */        28,     32767,     32767,     0,      32767,
+/* Mixed */     32767,     32767,     32767,     0,      32767,
+/* Punct */     32767,     32767,     32767, 32767,      32767,
+/* Digit */        15,     32767,     32767,     0,      32767,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -270,74 +279,92 @@ impl AztecCodeBuilder {
     }
 
     pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
-        let chars: Vec<char> = text.chars().collect();
-        for c in chars {
-            let (word, mode) = match c as u8 {
-                65..=90 => (Word::upper_letter(c), Mode::Upper),
-                97..=122 => (Word::lower_letter(c), Mode::Lower),
-                48..=57 => (Word::digit(c), Mode::Digit),
-                44 => { // ,
-                    if self.current_mode != Mode::Digit {
-                        (Word::Punc(17), Mode::Punctuation)
-                    } else {
-                        (Word::Digit(12), Mode::Digit)
-                    }
-                },
-                46 => { // .
-                    if self.current_mode != Mode::Digit {
-                        (Word::Punc(19), Mode::Punctuation)
-                    } else {
-                        (Word::Digit(13), Mode::Digit)
-                    }
-                },
-                33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
-                58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
-                91 => (Word::Punc(27), Mode::Punctuation), // [
-                93 => (Word::Punc(28), Mode::Punctuation), // ]
-                123 => (Word::Punc(29), Mode::Punctuation), // {
-                125 => (Word::Punc(30), Mode::Punctuation), // } 
-                64 => (Word::Mixed(20), Mode::Mixed), // @
-                92 => (Word::Mixed(21), Mode::Mixed), // \
-                94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
-                126 => (Word::Mixed(26), Mode::Mixed), // ~
-                10 => (Word::Punc(1), Mode::Punctuation), // \n
-                32 => { // space
-                    if self.current_mode != Mode::Punctuation {
-                        (Word::new(self.current_mode, 1), self.current_mode)
-                    } else {
-                        (Word::Char(1), Mode::Upper)
-                    }
-                },
-                _ => continue
-            };
-            self.push_in(word, mode);
+        if text.is_empty() {
+            return self;
         }
+        let mut chars = text.chars();
+        let mut prev_word = self.process_char(chars.next().unwrap());
+        for c in chars {
+            let next = self.process_char(c);
+            self.push_in(prev_word, Some(next));
+            prev_word = next;
+        }
+        self.push_in(prev_word, None);
         self
     }
 
-    fn push_in(&mut self, word: Word, expected_mode: Mode) {
-        let cur_mode = self.current_mode;
+    fn process_char(&self, c: char) -> (Word, Mode) {
+        match c as u8 {
+            65..=90 => (Word::upper_letter(c), Mode::Upper),
+            97..=122 => (Word::lower_letter(c), Mode::Lower),
+            48..=57 => (Word::digit(c), Mode::Digit),
+            44 => { // ,
+                if self.current_mode != Mode::Digit {
+                    (Word::Punc(17), Mode::Punctuation)
+                } else {
+                    (Word::Digit(12), Mode::Digit)
+                }
+            },
+            46 => { // .
+                if self.current_mode != Mode::Digit {
+                    (Word::Punc(19), Mode::Punctuation)
+                } else {
+                    (Word::Digit(13), Mode::Digit)
+                }
+            },
+            33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
+            58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
+            91 => (Word::Punc(27), Mode::Punctuation), // [
+            93 => (Word::Punc(28), Mode::Punctuation), // ]
+            123 => (Word::Punc(29), Mode::Punctuation), // {
+            125 => (Word::Punc(30), Mode::Punctuation), // } 
+            64 => (Word::Mixed(20), Mode::Mixed), // @
+            92 => (Word::Mixed(21), Mode::Mixed), // \
+            94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
+            126 => (Word::Mixed(26), Mode::Mixed), // ~
+            10 => (Word::Punc(1), Mode::Punctuation), // \n
+            32 => { // space
+                if self.current_mode != Mode::Punctuation {
+                    (Word::new(self.current_mode, 1), self.current_mode)
+                } else {
+                    (Word::Char(1), Mode::Upper)
+                }
+            },
+            _ => panic!("Character not supported `{}`", c)
+        }
+    }
+
+    fn push_in(&mut self, (word, expected_mode): (Word, Mode), 
+        next: Option<(Word, Mode)>) {
+        let mut cur_mode = self.current_mode;
+
         if cur_mode != expected_mode {
             // get the combination of words to switch from current to next mode
             let switch = cur_mode.val() * 5 + expected_mode.val();
-            let mut code = SWITCH_TABLE[switch];
-
-            let mut to_add = Vec::new();
-            let (mut limit, mut shift) = cur_mode.capacity();
-            let mut switch_mode = cur_mode;
-            while code > limit { // allow for multiple switch words
-                to_add.push(Word::new(switch_mode, (code & limit) as u8));
-                switch_mode = Mode::Upper; // force Char mode (5 bits encoded)
-                code >>= shift;
-                (limit, shift) = switch_mode.capacity();
-            }
-            to_add.push(Word::new(switch_mode, code as u8));
-            self.words.append(&mut to_add);
+            let mut code = LATCH_TABLE[switch];
 
             if expected_mode != Mode::Punctuation {
-                // there is no Punctuation latch so we never stay in that mode
                 self.current_mode = expected_mode;
             }
+            if let Some((_next_word, next_mode)) = next {
+                // see if we can do a shift instead of a latch
+                if next_mode == cur_mode {
+                    let shift = SHIFT_TABLE[switch];
+                    if shift != 32767 {
+                        code = shift;
+                        // go back to the last mode immediatly
+                        self.current_mode = cur_mode;
+                    }
+                }
+            }
+
+            let (limit, shift) = cur_mode.capacity();
+            if code > limit { // at most 2 words are needed to change mode
+                self.words.push(Word::new(cur_mode, (code & limit) as u8));
+                code >>= shift;
+                cur_mode = Mode::Upper; // force next word's bit len to 5 bits
+            }
+            self.words.push(Word::new(cur_mode, code as u8));
         }
         self.words.push(word);
     }
@@ -413,6 +440,8 @@ impl AztecCodeBuilder {
 
     fn to_words(&self, bitstr: &[bool], size: usize) -> Vec<u8> {
         let l = bitstr.len();
+        // we know that the bitstr len is exactly a multiple of the codeword 
+        // size thanks to add_padding
         let mut bytes = Vec::with_capacity(l / size);
         for i in (0..=(l - size)).step_by(size) {
             let mut val = 0;
@@ -433,7 +462,9 @@ impl AztecCodeBuilder {
             bitstr.len() * self.compression / 100);
         let (codeword_size, prim) = match layers {
             1..=2 => (6, 0b1000011),
-            3..=8 => (8, 0b100101101),
+            3..=4 => (8, 0b100101101),
+            // currently not supported
+            //3..=8 => (8, 0b100101101),
             //9..=22 => (10, 0b10000001001),
             //23..=32 => (12, 0b1000001101001),
             _ => panic!("Aztec code with {} layers is not supported", layers)
