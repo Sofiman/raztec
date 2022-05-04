@@ -8,7 +8,7 @@ fn main() {
     std::io::stdin().read_line(&mut input)
         .unwrap();
     let start = Instant::now();
-    let code = AztecCodeBuilder::new(23)
+    let code = AztecCodeBuilder::new()
         .append(input.trim()).build();
     /*
     let code = AztecCodeBuilder::new(23)
