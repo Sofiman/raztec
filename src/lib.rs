@@ -10,16 +10,22 @@ use std::fmt::Display;
 
 pub struct AztecCode {
     size: usize,
+    compact: bool,
     image: Vec<bool>
 }
 
 impl AztecCode {
-    pub fn new(size: usize) -> AztecCode {
-        if size < 11 {
-            panic!("Aztec Code minimum size is 11");
+    pub fn new(compact: bool, size: usize) -> AztecCode {
+        if compact {
+            if size < 11 {
+                panic!("Compact Aztec Code has a minimum size of 11x11");
+            }
+        } else if size < 15 {
+            panic!("Full-size Aztec Code has a minimum size of 15x15");
         }
+
         let image = vec![false; size*size];
-        let mut code = AztecCode { size, image };
+        let mut code = AztecCode { size, compact, image };
         code.build_finder_pattern();
         code
     }
@@ -27,7 +33,9 @@ impl AztecCode {
     fn build_finder_pattern(&mut self) {
         let size = self.size;
         let middle = size / 2;
-        for dim in (1..11).step_by(4) {
+        let max_ring_size = if self.compact { 11 } else { 15 };
+
+        for dim in (1..max_ring_size).step_by(4) {
             let start = middle - dim / 2;
             let end = middle + dim / 2;
             for i in start..=end {
@@ -37,15 +45,38 @@ impl AztecCode {
                 self[(end, i)] = true;
             }
         }
+
+        let d2u = max_ring_size / 2; // max ring size divided per 2
+        let d2l = d2u - 1; // max ring size divided per 2 minus 1
+
         // top left corner (3 spaces full)
-        self[(middle-5, middle-5)] = true;
-        self[(middle-4, middle-5)] = true;
-        self[(middle-5, middle-4)] = true;
+        self[(middle-d2u, middle-d2u)] = true;
+        self[(middle-d2l, middle-d2u)] = true;
+        self[(middle-d2u, middle-d2l)] = true;
         // top right corner (2 spaces full)
-        self[(middle-5, middle+5)] = true;
-        self[(middle-4, middle+5)] = true;
+        self[(middle-d2u, middle+d2u)] = true;
+        self[(middle-d2l, middle+d2u)] = true;
         // bottom right corner (1 space full)
-        self[(middle+4, middle+5)] = true;
+        self[(middle+d2l, middle+d2u)] = true;
+
+        // generate anchor grid
+        if !self.compact {
+            // precompute modulo to avoid convertion to i32
+            let mid = middle % 16;
+            for x in 0..size {
+                if x % 16 == mid {
+                    for y in 0..size {
+                        self[(x, y)] = (x + y + 1) % 2 == 1;
+                    }
+                } else {
+                    for y in 0..size {
+                        if y % 16 == mid {
+                            self[(x, y)] = (x + y + 1) % 2 == 1;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn invert(&mut self) {
@@ -56,6 +87,10 @@ impl AztecCode {
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn is_compact(&self) -> bool {
+        self.compact
     }
 }
 

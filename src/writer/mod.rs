@@ -50,6 +50,7 @@ impl Domino {
 
 struct AztecWriter {
     size: usize,
+    compact: bool,
     dominos: Vec<Domino>,
     codewords: usize,
     current_domino: usize,
@@ -58,6 +59,7 @@ struct AztecWriter {
 
 impl AztecWriter {
     fn new(codewords: usize, layers: usize) -> Self {
+        let compact = layers < 4;
         let size = layers * 4 + 11;
         let mut dominos = Vec::new();
 
@@ -86,7 +88,8 @@ impl AztecWriter {
 
         let start = if layers == 1 { 1 } else { 0 };
         AztecWriter { 
-            size, dominos, codewords, current_domino: start, current_bit: false
+            size, dominos, codewords, current_domino: start, 
+            current_bit: false, compact
         }
     }
 
@@ -106,7 +109,7 @@ impl AztecWriter {
     }
 
     fn into_aztec(self) -> AztecCode {
-        let mut code = AztecCode::new(self.size);
+        let mut code = AztecCode::new(self.compact, self.size);
 
         for domino in &self.dominos {
             code[domino.head()] = domino.head;
@@ -149,7 +152,7 @@ impl Display for AztecWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut blocks = vec![(0usize, "██"); self.size * self.size];
 
-        let mut code = AztecCode::new(self.size);
+        let mut code = AztecCode::new(self.compact, self.size);
 
         for (i, domino) in self.dominos.iter().enumerate() {
             let (row1, col1) = domino.head();
@@ -276,8 +279,8 @@ impl AztecCodeBuilder {
     /// Sets the error correction rate percentage of the final Aztec Code.
     pub fn error_correction(&mut self, rate: usize) 
         -> &mut AztecCodeBuilder {
-        if !(0..100).contains(&rate) {
-            panic!("Invalid error correction rate (0-100)");
+        if !(5..=95).contains(&rate) {
+            panic!("Invalid error correction rate (5-95)");
         }
         self.ecr = rate;
         self
