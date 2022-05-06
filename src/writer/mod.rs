@@ -59,31 +59,77 @@ struct AztecWriter {
 
 impl AztecWriter {
     fn new(codewords: usize, layers: usize) -> Self {
-        let compact = layers < 4;
-        let size = layers * 4 + 11;
+        let compact = layers <= 4;
+        let anchor_grid = if !compact { 2 } else { 0 };
+        let size = layers * 4 + anchor_grid + if compact { 11 } else { 15 };
         let mut dominos = Vec::new();
 
-        for layer in 0..layers {
-            let start = 2 * layer;
-            let end = size - start - 1;
-            let limit = end - start - 1;
+        if compact {
+            for layer in 0..layers {
+                let start = 2 * layer;
+                let end = size - start - 1;
+                let limit = end - start - 1;
 
-            for row in 0..limit {
-                dominos.push(Domino::right((start + row, start)))
+                for row in 0..limit {
+                    dominos.push(Domino::right((start + row, start)))
+                }
+
+                for col in 0..limit {
+                    dominos.push(Domino::up((end, start + col)))
+                }
+
+                for row in 0..limit {
+                    dominos.push(Domino::left((end - row, end)))
+                }
+
+                for col in 0..limit {
+                    dominos.push(Domino::down((start, end - col)))
+                }
             }
+        } else {
+            let mid = (size / 2) % 16;
+            let mut yoffset = 0;
+            for layer in 0..layers {
+                let start = 2 * layer;
+                let end = size - start - 1;
+                let limit = end - start - 4;
+                
+                if (start + yoffset) % 16 == mid {
+                    yoffset += 1;
+                }
 
-            for col in 0..limit {
-                dominos.push(Domino::up((end, start + col)))
+                let mut offset = yoffset;
+                for row in 0..limit {
+                    if (start + row + offset) % 16 == mid {
+                        offset += 1;
+                    }
+                    dominos.push(Domino::right((start + row + offset, start + yoffset)));
+                }
+
+                offset = yoffset;
+                for col in 0..limit {
+                    if (start + col + offset) % 16 == mid {
+                        offset += 1;
+                    }
+                    dominos.push(Domino::up((end - yoffset, start + col + offset)));
+                }
+
+                offset = yoffset;
+                for row in 0..limit {
+                    if (end - row - offset) % 16 == mid {
+                        offset += 1;
+                    }
+                    dominos.push(Domino::left((end - row - offset, end - yoffset)));
+                }
+
+                offset = yoffset;
+                for col in 0..limit {
+                    if (end - col - offset) % 16 == mid {
+                        offset += 1;
+                    }
+                    dominos.push(Domino::down((start + yoffset, end - col - offset)))
+                }
             }
-
-            for row in 0..limit {
-                dominos.push(Domino::left((end - row, end)))
-            }
-
-            for col in 0..limit {
-                dominos.push(Domino::down((start, end - col)))
-            }
-
         }
 
         let start = if layers == 1 { 1 } else { 0 };
@@ -116,9 +162,19 @@ impl AztecWriter {
             code[domino.tail()] = domino.tail;
         }
 
+        if self.compact {
+            self.setup_compact_service_message(&mut code);
+        } else {
+            self.setup_full_service_message(&mut code);
+        }
+
+        code
+    }
+
+    fn setup_compact_service_message(&self, code: &mut AztecCode) {
         let mut service_message = [false; 28];
-        let layers: u8 = ((self.size - 11) / 4 - 1) as u8;
-        let words = self.codewords as u8 - 1;
+        let layers = (self.size - 11) / 4 - 1;
+        let words = self.codewords - 1;
         let data = [(layers << 2) | ((words >> 4) & 3), words & 15];
 
         /* reed_solomon */
@@ -143,8 +199,45 @@ impl AztecWriter {
             code[(middle + 5, middle + 3 - i)]    = service_message[i + 14];
             code[(middle + 3 - i, start_idx)]     = service_message[i + 21];
         }
+    }
 
-        code
+    fn setup_full_service_message(&self, code: &mut AztecCode) {
+        let mut service_message = [true; 40];
+        let layers = (self.size - 15) / 4 - 1; // 5 bits
+        let words = self.codewords - 1; // 11 bits
+        let data = [
+             layers >> 1,
+             ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
+             (words & 0b00011110000) >> 4,
+             words & 0b00000001111,
+        ];
+
+        let encoder = ReedSolomonEncoder::new(4, 0b10011);
+        let check_codes = encoder.generate_check_codes(&data, 6);
+        let mut data = data.to_vec();
+        data.extend(&check_codes);
+
+        let mut i = 0;
+        for b in data.iter() {
+            for j in 0..4 {
+                service_message[i + 3 - j] = (b >> j) & 1 == 1;
+            }
+            i += 4;
+        }
+
+        let middle = self.size / 2;
+        let start_idx = middle - 7;
+        let end_idx = middle + 7;
+        for i in 0..5 {
+            code[(start_idx, start_idx + 2 + i)]  = service_message[i     ];
+            code[(start_idx, start_idx + 8 + i)]  = service_message[i +  5];
+            code[(start_idx + 2 + i, end_idx)]    = service_message[i + 10];
+            code[(start_idx + 8 + i, end_idx)]    = service_message[i + 15];
+            code[(end_idx, middle + 5 - i)]       = service_message[i + 20];
+            code[(end_idx, middle - 1 - i)]       = service_message[i + 25];
+            code[(middle + 5 - i, start_idx)]     = service_message[i + 30];
+            code[(middle - 1 - i, start_idx)]     = service_message[i + 35];
+        }
     }
 }
 
@@ -503,15 +596,29 @@ impl AztecCodeBuilder {
     /// Find the number of layers needed to fit `total_bits` bits
     fn find_nb_layers(&self, total_bits: usize) -> (usize, usize) {
         let mut layers = 1;
-        while (88 + 16 * layers) * layers < total_bits {
+        let mut nb_bits = (88 + 16 * layers) * layers;
+
+        while nb_bits < total_bits && layers < 4 {
             layers += 1;
+            nb_bits = (88 + 16 * layers) * layers;
         }
-        (layers, (88 + 16 * layers) * layers)
+
+        if layers == 4 && nb_bits < total_bits {
+            // if we couldn't fit `total_bits` in a compact aztec code, try
+            // with a full-size Aztec code (starting with 5 layers)
+            layers += 1;
+            nb_bits = (112 + 16 * layers) * layers;
+            while nb_bits < total_bits {
+                layers += 1;
+                nb_bits = (112 + 16 * layers) * layers;
+            }
+        }
+        (layers, nb_bits)
     }
 
     /// Converts the final bit string back into codewords to generate Reed
     /// Solomon check codewords.
-    fn to_words(&self, bitstr: &[bool], size: usize) -> Vec<u8> {
+    fn to_words(&self, bitstr: &[bool], size: usize) -> Vec<usize> {
         let l = bitstr.len();
         // we know that the bitstr len is exactly a multiple of the codeword 
         // size thanks to add_padding
@@ -520,7 +627,7 @@ impl AztecCodeBuilder {
             let mut val = 0;
             for j in 0..size {
                 val <<= 1;
-                val |= bitstr[i + j] as u8;
+                val |= bitstr[i + j] as usize;
             }
             bytes.push(val);
         }
@@ -534,15 +641,13 @@ impl AztecCodeBuilder {
         let mut bitstr = self.to_bit_string();
 
         // Reed Solomon Config
-        let (layers, bits_in_layers) = self.find_nb_layers(bitstr.len() + 
-            bitstr.len() * self.ecr / 100);
+        let (layers, bits_in_layers) =
+            self.find_nb_layers(bitstr.len() + bitstr.len() * self.ecr / 100);
         let (codeword_size, prim) = match layers {
-            1..=2 => (6, 0b1000011),
-            3..=4 => (8, 0b100101101),
-            // currently not supported
-            //3..=8 => (8, 0b100101101),
-            //9..=22 => (10, 0b10000001001),
-            //23..=32 => (12, 0b1000001101001),
+            1..=2   => ( 6,      0b1000011),
+            3..=8   => ( 8,    0b100101101),
+            9..=22  => (10,   0b10000001001),
+            23..=32 => (12, 0b1000001101001),
             _ => panic!("Aztec code with {} layers is not supported", layers)
         };
 
@@ -555,8 +660,17 @@ impl AztecCodeBuilder {
         let rs = ReedSolomonEncoder::new(codeword_size as u8, prim);
 
         let check_words = rs.generate_check_codes(&words, to_fill);
-        for check_word in check_words {
-            self.append_bits(&mut bitstr, check_word, codeword_size as u8);
+        if codeword_size > 8 {
+            for check_word in check_words {
+                self.append_bits(&mut bitstr, (check_word >> 8) as u8, 
+                    (codeword_size - 8) as u8);
+                self.append_bits(&mut bitstr, (check_word & 0xFF) as u8, 8);
+            }
+        } else {
+            for check_word in check_words {
+                self.append_bits(&mut bitstr, check_word as u8,
+                    codeword_size as u8);
+            }
         }
 
         let mut writer = AztecWriter::new(codewords, layers);
