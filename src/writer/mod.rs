@@ -5,7 +5,8 @@ struct Domino {
     dir: Direction,
     head_pos: (usize, usize),
     head: bool,
-    tail: bool
+    tail: bool,
+    offset: usize
 }
 
 #[derive(Debug)]
@@ -18,19 +19,19 @@ enum Direction {
 
 impl Domino {
     fn down(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Down, head: false, tail: false }
+        Self { head_pos, dir: Direction::Down, head: false, tail: false, offset: 0 }
     }
 
     fn left(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Left, head: false, tail: false }
+        Self { head_pos, dir: Direction::Left, head: false, tail: false, offset: 0 }
     }
 
     fn up(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Up, head: false, tail: false }
+        Self { head_pos, dir: Direction::Up, head: false, tail: false, offset: 0 }
     }
 
     fn right(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Right, head: false, tail: false }
+        Self { head_pos, dir: Direction::Right, head: false, tail: false, offset: 0 }
     }
 
     fn head(&self) -> (usize, usize) {
@@ -40,16 +41,25 @@ impl Domino {
     fn tail(&self) -> (usize, usize) {
         let (row, col) = self.head_pos;
         match &self.dir {
-            Direction::Down  => (row + 1, col),
-            Direction::Left  => (row, col - 1),
-            Direction::Up    => (row - 1, col),
-            Direction::Right => (row, col + 1)
+            Direction::Down  => (row + 1 + self.offset, col),
+            Direction::Left  => (row, col - 1 - self.offset),
+            Direction::Up    => (row - 1 - self.offset, col),
+            Direction::Right => (row, col + 1 + self.offset)
         }
+    }
+
+    fn check_offset(&mut self, middle: usize) -> usize {
+        let (x,y) = self.tail();
+        if x % 16 == middle || y % 16 == middle {
+            self.offset += 1;
+        }
+        self.offset
     }
 }
 
 struct AztecWriter {
     size: usize,
+    layers: usize,
     compact: bool,
     dominos: Vec<Domino>,
     codewords: usize,
@@ -58,10 +68,18 @@ struct AztecWriter {
 }
 
 impl AztecWriter {
-    fn new(codewords: usize, layers: usize) -> Self {
+    fn new(codewords: usize, layers: usize, start_align: usize) -> Self {
+        //let layers = 12;
         let compact = layers <= 4;
-        let anchor_grid = if !compact { 2 } else { 0 };
-        let size = layers * 4 + anchor_grid + if compact { 11 } else { 15 };
+        let size = {
+            let size = layers * 4 + if compact { 11 } else { 14 };
+            if compact {
+                size
+            } else {
+                size + 1 + 2 * ((size / 2 - 1) / 15)
+            }
+        };
+        //println!("{}", size);
         let mut dominos = Vec::new();
 
         if compact {
@@ -88,53 +106,68 @@ impl AztecWriter {
             }
         } else {
             let mid = (size / 2) % 16;
+            let mut xoffset = 0;
             let mut yoffset = 0;
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
-                let limit = end - start - 4;
-                
+                let limit = end - start - 1;
+
                 if (start + yoffset) % 16 == mid {
                     yoffset += 1;
                 }
-
-                let mut offset = yoffset;
-                for row in 0..limit {
-                    if (start + row + offset) % 16 == mid {
-                        offset += 1;
-                    }
-                    dominos.push(Domino::right((start + row + offset, start + yoffset)));
+                if (start + xoffset) % 16 == mid {
+                    xoffset += 1;
                 }
 
-                offset = yoffset;
-                for col in 0..limit {
-                    if (start + col + offset) % 16 == mid {
-                        offset += 1;
+                for row in 0..(limit-yoffset*2) {
+                    if (start + row + yoffset) % 16 == mid {
+                        continue;
                     }
-                    dominos.push(Domino::up((end - yoffset, start + col + offset)));
+                    let mut domino = Domino::right((start + row + yoffset, start + xoffset));
+                    domino.check_offset(mid);
+                    dominos.push(domino);
                 }
 
-                offset = yoffset;
-                for row in 0..limit {
-                    if (end - row - offset) % 16 == mid {
-                        offset += 1;
+                for col in 0..(limit-xoffset*2) {
+                    if (start + col + xoffset) % 16 == mid {
+                        continue;
                     }
-                    dominos.push(Domino::left((end - row - offset, end - yoffset)));
+                    let mut domino = Domino::up((end - yoffset, start + col + xoffset));
+                    domino.check_offset(mid);
+                    dominos.push(domino);
                 }
 
-                offset = yoffset;
-                for col in 0..limit {
-                    if (end - col - offset) % 16 == mid {
-                        offset += 1;
+                for row in 0..(limit-yoffset*2) {
+                    if (end - row - yoffset) % 16 == mid {
+                        continue;
                     }
-                    dominos.push(Domino::down((start + yoffset, end - col - offset)))
+                    let mut domino = Domino::left((end - row - yoffset, end - xoffset));
+                    domino.check_offset(mid);
+                    dominos.push(domino);
+                }
+
+                let lit = if layer == 0 { limit - 1 } else {limit - yoffset*2 };
+                for col in 0..lit {
+                    if (end - col - xoffset) % 16 == mid {
+                        continue;
+                    }
+                    let mut domino = Domino::down((start + yoffset, end - col - xoffset));
+                    domino.check_offset(mid);
+                    dominos.push(domino);
+                }
+
+                if (start + xoffset + 1) % 16 == mid {
+                    xoffset += 1;
+                }
+                if (end - yoffset - 1) % 16 == mid {
+                    yoffset += 1;
                 }
             }
         }
 
-        let start = if layers == 1 { 1 } else { 0 };
         AztecWriter { 
-            size, dominos, codewords, current_domino: start, 
+            size, layers, dominos, codewords, current_domino: start_align,
             current_bit: false, compact
         }
     }
@@ -203,7 +236,7 @@ impl AztecWriter {
 
     fn setup_full_service_message(&self, code: &mut AztecCode) {
         let mut service_message = [true; 40];
-        let layers = (self.size - 15) / 4 - 1; // 5 bits
+        let layers = self.layers - 1; // 5 bits
         let words = self.codewords - 1; // 11 bits
         let data = [
              layers >> 1,
@@ -518,6 +551,7 @@ impl AztecCodeBuilder {
     /// Copies `bits` bits starting from the MSB from `byte` to
     /// the end of bit string
     fn append_bits(&self, bitstr: &mut Vec<bool>, byte: u8, bits: u8)  {
+        assert!(bits <= 8);
         for bit in 0..bits {
             let bit = bits - 1 - bit;
             bitstr.push(((byte >> bit) & 1) == 1);
@@ -673,7 +707,10 @@ impl AztecCodeBuilder {
             }
         }
 
-        let mut writer = AztecWriter::new(codewords, layers);
+        let start_align = (bits_in_layers % codeword_size) / 2;
+        println!("layers: {}", layers);
+        let mut writer = AztecWriter::new(codewords, layers, start_align);
+        println!("{}", writer);
         writer.fill(&bitstr);
         writer.into_aztec()
     }

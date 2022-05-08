@@ -3,16 +3,18 @@ use std::time::Instant;
 use raztec::writer::AztecCodeBuilder;
 
 fn main() {
+    /*
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)
         .unwrap();
+    */
     let start = Instant::now();
-    let code = AztecCodeBuilder::new()
-        .append(input.trim()).build();
     /*
     let code = AztecCodeBuilder::new()
-        .append("LOREM IPSUM DOLOR SIT AMET CONSECTETUR ADIPISCING ELIT NUNC BIBENDUM A NISI POSUERE BLANDIT NULLA UT TELLUS ERAT").build();
+        .append(input.trim()).build();
     */
+    let code = AztecCodeBuilder::new()
+        .append("LOREM IPSUM DOLOR SIT AMET CONSECTETUR ADIPISCING ELIT NUNC VESTIBULUM NUNC SED LECTUS SCELERISQUE LAOREET DONEC PULVINAR QUAM A ALIQUAM TINCIDUNT SUSPENDISSE LAOREET TINCIDUNT IPSUM PORTA INTERDUM AUGUE CONSECTETUR A MORBI FERMENTUM ULTRICIES SUSCIPIT IN SUSCIPIT METUS SED SOLLICITUDIN RUTRUM VELIT NISL IMPERDIET URNA A ACCUMSAN MI MAURIS VITAE ENIM SED MOLLIS ENIM IPSUM QUIS CONVALLIS IPSUM VIVERRA VITAE AENEAN EU ELIT AC ANTE ELEIFEND VARIUS CRAS UT NISI QUAM NULLAM ORNARE PORTA ODIO EU PORTA VELIT PULVINAR VEL ETIAM").build();
     /*
     let code = AztecCodeBuilder::new().error_correction(23)
         .append("Hello").append(", ").append("World! 0123456789").build();
