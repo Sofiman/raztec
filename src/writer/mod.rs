@@ -69,7 +69,6 @@ struct AztecWriter {
 
 impl AztecWriter {
     fn new(codewords: usize, layers: usize, start_align: usize) -> Self {
-        //let layers = 12;
         let compact = layers <= 4;
         let size = {
             let size = layers * 4 + if compact { 11 } else { 14 };
@@ -79,7 +78,6 @@ impl AztecWriter {
                 size + 1 + 2 * ((size / 2 - 1) / 15)
             }
         };
-        //println!("{}", size);
         let mut dominos = Vec::new();
 
         if compact {
@@ -111,13 +109,27 @@ impl AztecWriter {
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
-                let limit = end - start - 1;
+                let mut limit = end - start - 1;
 
                 if (start + yoffset) % 16 == mid {
                     yoffset += 1;
                 }
                 if (start + xoffset) % 16 == mid {
                     xoffset += 1;
+                }
+
+                let mut delta_x = 0;
+                let mut delta_y = 0;
+                // check if any domino will be cut in half
+                if (start + xoffset + 1) % 16 == mid {
+                    delta_x = 1;
+                    limit -= 1;
+                }
+                if (end - yoffset - 1) % 16 == mid {
+                    delta_y = 1;
+                    if delta_x == 0 {
+                        limit -= 1;
+                    }
                 }
 
                 for row in 0..(limit-yoffset*2) {
@@ -147,8 +159,7 @@ impl AztecWriter {
                     dominos.push(domino);
                 }
 
-                let lit = if layer == 0 { limit - 1 } else {limit - yoffset*2 };
-                for col in 0..lit {
+                for col in 0..(limit-yoffset*2) {
                     if (end - col - xoffset) % 16 == mid {
                         continue;
                     }
@@ -157,12 +168,8 @@ impl AztecWriter {
                     dominos.push(domino);
                 }
 
-                if (start + xoffset + 1) % 16 == mid {
-                    xoffset += 1;
-                }
-                if (end - yoffset - 1) % 16 == mid {
-                    yoffset += 1;
-                }
+                xoffset += delta_x;
+                yoffset += delta_y;
             }
         }
 
@@ -276,7 +283,7 @@ impl AztecWriter {
 
 impl Display for AztecWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut blocks = vec![(0usize, "██"); self.size * self.size];
+        let mut blocks = vec![(0usize, "##"); self.size * self.size];
 
         let mut code = AztecCode::new(self.compact, self.size);
 
@@ -287,6 +294,18 @@ impl Display for AztecWriter {
             code[(row2, col2)] = domino.tail;
             let idx1 = row1 * self.size + col1;
             let color = i % 8;
+            let (_, current) = blocks[idx1];
+            if current != "##" {
+                println!("head collision detected");
+                blocks[row2 * self.size + col2] = (color, "@@");
+                continue;
+            }
+            let (_, current) = blocks[row2 * self.size + col2];
+            if current != "##" {
+                println!("tail collision detected");
+                blocks[row2 * self.size + col2] = (color, "$$");
+                continue;
+            }
             match domino.dir {
                 Direction::Right => blocks[idx1] = (color, "->"),
                 Direction::Up    => blocks[idx1] = (color, "^^"),
@@ -708,7 +727,6 @@ impl AztecCodeBuilder {
         }
 
         let start_align = (bits_in_layers % codeword_size) / 2;
-        println!("layers: {}", layers);
         let mut writer = AztecWriter::new(codewords, layers, start_align);
         println!("{}", writer);
         writer.fill(&bitstr);
