@@ -1,6 +1,6 @@
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Domino {
     dir: Direction,
     head_pos: (usize, usize),
@@ -9,8 +9,9 @@ struct Domino {
     offset: usize
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
+    None,
     Down,
     Left,
     Up,
@@ -18,6 +19,7 @@ enum Direction {
 }
 
 impl Domino {
+
     fn down(head_pos: (usize, usize)) -> Self {
         Self { head_pos, dir: Direction::Down, head: false, tail: false, offset: 0 }
     }
@@ -41,6 +43,7 @@ impl Domino {
     fn tail(&self) -> (usize, usize) {
         let (row, col) = self.head_pos;
         match &self.dir {
+            Direction::None => panic!("Trying to access the tail of an empty domino"),
             Direction::Down  => (row + 1 + self.offset, col),
             Direction::Left  => (row, col - 1 - self.offset),
             Direction::Up    => (row - 1 - self.offset, col),
@@ -57,6 +60,15 @@ impl Domino {
     }
 }
 
+impl Default for Domino {
+    fn default() -> Self {
+        Domino { 
+            dir: Direction::None, head_pos: (0, 0),
+            head: false, tail: false, offset: 0
+        }
+    }
+}
+
 struct AztecWriter {
     size: usize,
     layers: usize,
@@ -69,41 +81,40 @@ struct AztecWriter {
 
 impl AztecWriter {
     fn new(codewords: usize, layers: usize, start_align: usize) -> Self {
+        let layers = 6;
         let compact = layers <= 4;
+        let bullseye_size = if compact { 11 } else { 15 };
+        let raw_size = layers * 4 + bullseye_size;
         let size = {
-            let size = layers * 4 + if compact { 11 } else { 14 };
             if compact {
-                size
+                raw_size
             } else {
-                size + 1 + 2 * ((size / 2 - 1) / 15)
+                raw_size + 2 * (((raw_size - 1) / 2 - 1) / 15)
             }
         };
-        let mut dominos = Vec::new();
+        let domino_count = (raw_size * raw_size - bullseye_size * bullseye_size) / 2;
+        let mut dominos = vec![Domino::default(); domino_count+40];
 
         if compact {
+            let mut idx = 0;
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
                 let limit = end - start - 1;
 
-                for row in 0..limit {
-                    dominos.push(Domino::right((start + row, start)))
+                for offset in 0..limit {
+                    let base = idx + offset;
+                    dominos[base          ] = Domino::right((start + offset, start));
+                    dominos[base + limit  ] = Domino::up((end, start + offset));
+                    dominos[base + limit*2] = Domino::left((end - offset, end));
+                    dominos[base + limit*3] = Domino::down((start, end - offset));
                 }
-
-                for col in 0..limit {
-                    dominos.push(Domino::up((end, start + col)))
-                }
-
-                for row in 0..limit {
-                    dominos.push(Domino::left((end - row, end)))
-                }
-
-                for col in 0..limit {
-                    dominos.push(Domino::down((start, end - col)))
-                }
+                idx += limit*4;
             }
         } else {
+
             let mid = (size / 2) % 16;
+            let mut idx = 0;
             let mut xoffset = 0;
             let mut yoffset = 0;
             for layer in 0..layers {
@@ -132,6 +143,38 @@ impl AztecWriter {
                     }
                 }
 
+                let ycount = limit - yoffset * 2;
+                let xcount = limit - xoffset * 2;
+
+                for offset in 0..ycount {
+                    let base = idx + offset;
+                    if (start + offset + yoffset) % 16 != mid {
+                        let mut domino = Domino::right((start + offset + yoffset, start + xoffset));
+                        domino.check_offset(mid);
+                        dominos[base] = domino;
+                    }
+                    if (end - offset - yoffset) % 16 != mid {
+                        let mut domino = Domino::left((end - offset - yoffset, end - xoffset));
+                        domino.check_offset(mid);
+                        dominos[base + ycount + xcount] = domino;
+                    }
+                }
+                for offset in 0..xcount {
+                    let base = idx + offset;
+                    if (start + offset + xoffset) % 16 != mid {
+                        let mut domino = Domino::up((end - yoffset, start + offset + xoffset));
+                        domino.check_offset(mid);
+                        dominos[base + ycount] = domino;
+                    }
+                    if (end - offset - xoffset) % 16 != mid {
+                        let mut domino = Domino::down((start + yoffset, end - offset - xoffset));
+                        domino.check_offset(mid);
+                        dominos[base + ycount + xcount + ycount] = domino;
+                    }
+                }
+                idx += ycount * 2 + xcount * 2;
+
+                /*
                 for row in 0..(limit-yoffset*2) {
                     if (start + row + yoffset) % 16 == mid {
                         continue;
@@ -166,7 +209,7 @@ impl AztecWriter {
                     let mut domino = Domino::down((start + yoffset, end - col - xoffset));
                     domino.check_offset(mid);
                     dominos.push(domino);
-                }
+                }*/
 
                 xoffset += delta_x;
                 yoffset += delta_y;
@@ -288,6 +331,10 @@ impl Display for AztecWriter {
         let mut code = AztecCode::new(self.compact, self.size);
 
         for (i, domino) in self.dominos.iter().enumerate() {
+            if domino.dir == Direction::None {
+                println!("found empty domino at idx {}", i);
+                continue;
+            }
             let (row1, col1) = domino.head();
             let (row2, col2) = domino.tail();
             code[(row1, col1)] = domino.head;
@@ -311,6 +358,7 @@ impl Display for AztecWriter {
                 Direction::Up    => blocks[idx1] = (color, "^^"),
                 Direction::Left  => blocks[idx1] = (color, "<-"),
                 Direction::Down  => blocks[idx1] = (color, "vv"),
+                Direction::None => unreachable!()
             }
             blocks[row2 * self.size + col2] = (color, "██");
         }
