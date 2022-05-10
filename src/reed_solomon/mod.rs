@@ -27,6 +27,8 @@ impl ReedSolomonEncoder {
         }
 
         let (_, rem) = poly / generator;
-        rem.iter().take(k).rev().map(|&x| x.value()).collect()
+        let mut output: Vec<usize> = data.to_vec();
+        output.extend(rem.iter().take(k).rev().map(|&x| x.value()));
+        output
     }
 }

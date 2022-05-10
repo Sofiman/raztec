@@ -51,7 +51,7 @@ impl Domino {
         }
     }
 
-    fn check_offset(&mut self, middle: usize) -> usize {
+    fn check_splitting(&mut self, middle: usize) -> usize {
         let (x,y) = self.tail();
         if x % 16 == middle || y % 16 == middle {
             self.offset += 1;
@@ -101,68 +101,67 @@ impl AztecWriter {
                 let end = size - start - 1;
                 let limit = end - start - 1;
 
-                for offset in 0..limit {
-                    let base = idx + offset;
-                    dominos[base          ] = Domino::right((start + offset, start));
-                    dominos[base + limit  ] = Domino::up((end, start + offset));
-                    dominos[base + limit*2] = Domino::left((end - offset, end));
-                    dominos[base + limit*3] = Domino::down((start, end - offset));
+                for i in 0..limit {
+                    let base = idx + i;
+                    dominos[base          ] = Domino::right((start + i,start));
+                    dominos[base + limit  ] = Domino::up((end, start + i));
+                    dominos[base + limit*2] = Domino::left((end - i, end));
+                    dominos[base + limit*3] = Domino::down((start, end - i));
                 }
                 idx += limit*4;
             }
         } else {
             let mid = (size / 2) % 16;
             let mut idx = 0;
-            let mut xoffset = 0;
-            let mut yoffset = 0;
-            let mut dpl = size - 3 - (size - 3) / 15; // domino per row
+            let mut skips = 0;
+            let mut dpl = size - 3 - (size - 3) / 15; // domino per line
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
                 let mut limit = end - start - 1;
 
-                if (start + yoffset) % 16 == mid {
-                    yoffset += 1;
-                }
-                if (start + xoffset) % 16 == mid {
-                    xoffset += 1;
+                if (start + skips) % 16 == mid {
+                    skips += 1;
                 }
 
                 let mut delta = 0;
                 // check if any domino will be cut in half
-                if (start + xoffset + 1) % 16 == mid {
+                if (start + skips + 1) % 16 == mid {
                     delta = 1;
                     limit -= 1;
                 }
 
                 let mut j = idx;
-                for offset in 0..(limit - yoffset * 2) {
-                    if (start + offset + yoffset) % 16 != mid {
-                        let mut domino = Domino::right((start + offset + yoffset, start + xoffset));
-                        domino.check_offset(mid);
+                for offset in 0..(limit - skips * 2) {
+                    if (start + offset + skips) % 16 != mid {
+                        let mut domino = Domino::right(
+                            (start + offset + skips, start + skips));
+                        domino.check_splitting(mid);
                         dominos[j] = domino;
-                        let mut domino = Domino::left((end - offset - yoffset, end - xoffset));
-                        domino.check_offset(mid);
+                        let mut domino = Domino::left(
+                            (end - offset - skips, end - skips));
+                        domino.check_splitting(mid);
                         dominos[j + dpl * 2] = domino;
                         j += 1;
                     }
                 }
                 j = idx;
-                for offset in 0..(limit - xoffset * 2) {
-                    if (start + offset + xoffset) % 16 != mid {
-                        let mut domino = Domino::up((end - yoffset, start + offset + xoffset));
-                        domino.check_offset(mid);
+                for offset in 0..(limit - skips * 2) {
+                    if (start + offset + skips) % 16 != mid {
+                        let mut domino = Domino::up(
+                            (end - skips, start + offset + skips));
+                        domino.check_splitting(mid);
                         dominos[j + dpl] = domino;
-                        let mut domino = Domino::down((start + yoffset, end - offset - xoffset));
-                        domino.check_offset(mid);
+                        let mut domino = Domino::down(
+                            (start + skips, end - offset - skips));
+                        domino.check_splitting(mid);
                         dominos[j + dpl * 3] = domino;
                         j += 1;
                     }
                 }
                 idx += dpl * 4;
                 dpl -= 4;
-                xoffset += delta;
-                yoffset += delta;
+                skips += delta;
             }
         }
 
@@ -198,27 +197,26 @@ impl AztecWriter {
             code[domino.tail()] = domino.tail;
         }
 
-        if self.compact {
-            self.setup_compact_service_message(&mut code);
-        } else {
-            self.setup_full_service_message(&mut code);
-        }
-
-        code
-    }
-
-    fn setup_compact_service_message(&self, code: &mut AztecCode) {
-        let mut service_message = [false; 28];
-        let layers = (self.size - 11) / 4 - 1;
+        let layers = self.layers - 1;
         let words = self.codewords - 1;
-        let data = [(layers << 2) | ((words >> 4) & 3), words & 15];
-
-        /* reed_solomon */
         let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes = encoder.generate_check_codes(&data, 5);
-        let mut data = data.to_vec();
-        data.extend(&check_codes);
 
+        let (words, data) =
+            if self.compact {
+                (28, encoder.generate_check_codes(&[
+                    (layers << 2) | ((words >> 4) & 3),
+                    words & 15
+                ], 5))
+            } else {
+                (40, encoder.generate_check_codes(&[
+                     layers >> 1,
+                     ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
+                     (words & 0b00011110000) >> 4,
+                     words & 0b00000001111,
+                ], 6))
+            };
+
+        let mut service_message = vec![false; words];
         let mut i = 0;
         for b in data.iter() {
             for j in 0..4 {
@@ -227,6 +225,17 @@ impl AztecWriter {
             i += 4;
         }
 
+        if self.compact {
+            self.fill_compact_service_message(&service_message, &mut code);
+        } else {
+            self.fill_full_service_message(&service_message, &mut code);
+        }
+
+        code
+    }
+
+    fn fill_compact_service_message(&self, service_message: &[bool],
+        code: &mut AztecCode) {
         let middle = self.size / 2;
         let start_idx = middle - 5;
         for i in 0..7 {
@@ -237,30 +246,8 @@ impl AztecWriter {
         }
     }
 
-    fn setup_full_service_message(&self, code: &mut AztecCode) {
-        let mut service_message = [true; 40];
-        let layers = self.layers - 1; // 5 bits
-        let words = self.codewords - 1; // 11 bits
-        let data = [
-             layers >> 1,
-             ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
-             (words & 0b00011110000) >> 4,
-             words & 0b00000001111,
-        ];
-
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes = encoder.generate_check_codes(&data, 6);
-        let mut data = data.to_vec();
-        data.extend(&check_codes);
-
-        let mut i = 0;
-        for b in data.iter() {
-            for j in 0..4 {
-                service_message[i + 3 - j] = (b >> j) & 1 == 1;
-            }
-            i += 4;
-        }
-
+    fn fill_full_service_message(&self, service_message: &[bool],
+        code: &mut AztecCode) {
         let middle = self.size / 2;
         let start_idx = middle - 7;
         let end_idx = middle + 7;
@@ -571,8 +558,7 @@ impl AztecCodeBuilder {
     /// the end of bit string
     fn append_bits(&self, bitstr: &mut Vec<bool>, byte: u8, bits: u8)  {
         assert!(bits <= 8);
-        for bit in 0..bits {
-            let bit = bits - 1 - bit;
+        for bit in (0..bits).rev() {
             bitstr.push(((byte >> bit) & 1) == 1);
         }
     }
@@ -630,19 +616,19 @@ impl AztecCodeBuilder {
         }
 
         // pad the last bits by 1s to next codeword boundary
-        let remaining = codeword_size - remaining;
-        for _i in 0..remaining {
+        for _i in 0..(codeword_size - remaining) {
             bitstr.push(true);
         }
 
         // check if the last codeword is all ones to do one bit stuffing
         let len = bitstr.len();
         let mut i = len - codeword_size;
-        while i < len && bitstr[i] {
+        let limit = i + remaining;
+        while i <= limit && bitstr[i] {
             i += 1;
         }
-        if i == len {
-            bitstr[i - 1] = false;
+        if i == limit {
+            bitstr[len - 1] = false;
         }
     }
 
@@ -714,19 +700,20 @@ impl AztecCodeBuilder {
 
         let check_words = rs.generate_check_codes(&words, to_fill);
         if codeword_size > 8 {
-            for check_word in check_words {
+            for check_word in check_words.iter().skip(words.len()) {
                 self.append_bits(&mut bitstr, (check_word >> 8) as u8, 
                     (codeword_size - 8) as u8);
                 self.append_bits(&mut bitstr, (check_word & 0xFF) as u8, 8);
             }
         } else {
-            for check_word in check_words {
+            for &check_word in check_words.iter().skip(words.len()) {
                 self.append_bits(&mut bitstr, check_word as u8,
                     codeword_size as u8);
             }
         }
 
         let start_align = (bits_in_layers % codeword_size) / 2;
+        println!("layers: {}", layers);
         let mut writer = AztecWriter::new(codewords, layers, start_align);
         //println!("{}", writer);
         writer.fill(&bitstr);
