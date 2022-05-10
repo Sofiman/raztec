@@ -92,6 +92,19 @@ impl AztecCode {
     pub fn is_compact(&self) -> bool {
         self.compact
     }
+
+    pub fn to_rgb(&self, module_size: usize) -> Vec<u8> {
+        let side = self.size * module_size;
+        let mut pixels = vec![0; side * side];
+        for i in 0..side {
+            for j in 0..side {
+                let bit = self.image[(i / module_size) * self.size + j / module_size];
+                pixels[i * side + j] = if bit { 0 } else { 255 };
+            }
+        }
+
+        pixels
+    }
 }
 
 impl Index<(usize, usize)> for AztecCode {

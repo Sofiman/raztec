@@ -81,7 +81,6 @@ struct AztecWriter {
 
 impl AztecWriter {
     fn new(codewords: usize, layers: usize, start_align: usize) -> Self {
-        let layers = 6;
         let compact = layers <= 4;
         let bullseye_size = if compact { 11 } else { 15 };
         let raw_size = layers * 4 + bullseye_size;
@@ -93,7 +92,7 @@ impl AztecWriter {
             }
         };
         let domino_count = (raw_size * raw_size - bullseye_size * bullseye_size) / 2;
-        let mut dominos = vec![Domino::default(); domino_count+40];
+        let mut dominos = vec![Domino::default(); domino_count];
 
         if compact {
             let mut idx = 0;
@@ -112,11 +111,11 @@ impl AztecWriter {
                 idx += limit*4;
             }
         } else {
-
             let mid = (size / 2) % 16;
             let mut idx = 0;
             let mut xoffset = 0;
             let mut yoffset = 0;
+            let mut dpl = size - 3 - (size - 3) / 15; // domino per row
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
@@ -129,90 +128,41 @@ impl AztecWriter {
                     xoffset += 1;
                 }
 
-                let mut delta_x = 0;
-                let mut delta_y = 0;
+                let mut delta = 0;
                 // check if any domino will be cut in half
                 if (start + xoffset + 1) % 16 == mid {
-                    delta_x = 1;
+                    delta = 1;
                     limit -= 1;
                 }
-                if (end - yoffset - 1) % 16 == mid {
-                    delta_y = 1;
-                    if delta_x == 0 {
-                        limit -= 1;
-                    }
-                }
 
-                let ycount = limit - yoffset * 2;
-                let xcount = limit - xoffset * 2;
-
-                for offset in 0..ycount {
-                    let base = idx + offset;
+                let mut j = idx;
+                for offset in 0..(limit - yoffset * 2) {
                     if (start + offset + yoffset) % 16 != mid {
                         let mut domino = Domino::right((start + offset + yoffset, start + xoffset));
                         domino.check_offset(mid);
-                        dominos[base] = domino;
-                    }
-                    if (end - offset - yoffset) % 16 != mid {
+                        dominos[j] = domino;
                         let mut domino = Domino::left((end - offset - yoffset, end - xoffset));
                         domino.check_offset(mid);
-                        dominos[base + ycount + xcount] = domino;
+                        dominos[j + dpl * 2] = domino;
+                        j += 1;
                     }
                 }
-                for offset in 0..xcount {
-                    let base = idx + offset;
+                j = idx;
+                for offset in 0..(limit - xoffset * 2) {
                     if (start + offset + xoffset) % 16 != mid {
                         let mut domino = Domino::up((end - yoffset, start + offset + xoffset));
                         domino.check_offset(mid);
-                        dominos[base + ycount] = domino;
-                    }
-                    if (end - offset - xoffset) % 16 != mid {
+                        dominos[j + dpl] = domino;
                         let mut domino = Domino::down((start + yoffset, end - offset - xoffset));
                         domino.check_offset(mid);
-                        dominos[base + ycount + xcount + ycount] = domino;
+                        dominos[j + dpl * 3] = domino;
+                        j += 1;
                     }
                 }
-                idx += ycount * 2 + xcount * 2;
-
-                /*
-                for row in 0..(limit-yoffset*2) {
-                    if (start + row + yoffset) % 16 == mid {
-                        continue;
-                    }
-                    let mut domino = Domino::right((start + row + yoffset, start + xoffset));
-                    domino.check_offset(mid);
-                    dominos.push(domino);
-                }
-
-                for col in 0..(limit-xoffset*2) {
-                    if (start + col + xoffset) % 16 == mid {
-                        continue;
-                    }
-                    let mut domino = Domino::up((end - yoffset, start + col + xoffset));
-                    domino.check_offset(mid);
-                    dominos.push(domino);
-                }
-
-                for row in 0..(limit-yoffset*2) {
-                    if (end - row - yoffset) % 16 == mid {
-                        continue;
-                    }
-                    let mut domino = Domino::left((end - row - yoffset, end - xoffset));
-                    domino.check_offset(mid);
-                    dominos.push(domino);
-                }
-
-                for col in 0..(limit-yoffset*2) {
-                    if (end - col - xoffset) % 16 == mid {
-                        continue;
-                    }
-                    let mut domino = Domino::down((start + yoffset, end - col - xoffset));
-                    domino.check_offset(mid);
-                    dominos.push(domino);
-                }*/
-
-                xoffset += delta_x;
-                yoffset += delta_y;
+                idx += dpl * 4;
+                dpl -= 4;
+                xoffset += delta;
+                yoffset += delta;
             }
         }
 
@@ -241,6 +191,9 @@ impl AztecWriter {
         let mut code = AztecCode::new(self.compact, self.size);
 
         for domino in &self.dominos {
+            if domino.dir == Direction::None {
+                continue;
+            }
             code[domino.head()] = domino.head;
             code[domino.tail()] = domino.tail;
         }
@@ -452,7 +405,6 @@ impl Word {
         Word::Digit(c as u8 - 48 + 2)
     }
 }
-
 
 pub struct AztecCodeBuilder {
     current_mode: Mode,
@@ -776,7 +728,7 @@ impl AztecCodeBuilder {
 
         let start_align = (bits_in_layers % codeword_size) / 2;
         let mut writer = AztecWriter::new(codewords, layers, start_align);
-        println!("{}", writer);
+        //println!("{}", writer);
         writer.fill(&bitstr);
         writer.into_aztec()
     }
