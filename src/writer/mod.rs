@@ -1,14 +1,5 @@
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
-#[derive(Debug, Clone)]
-struct Domino {
-    dir: Direction,
-    head_pos: (usize, usize),
-    head: bool,
-    tail: bool,
-    offset: usize
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
     None,
@@ -16,6 +7,21 @@ enum Direction {
     Left,
     Up,
     Right,
+}
+
+impl Default for Direction {
+    fn default() -> Self {
+        Direction::None
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct Domino {
+    dir: Direction,
+    head_pos: (usize, usize),
+    head: bool,
+    tail: bool,
+    offset: usize
 }
 
 impl Domino {
@@ -60,15 +66,6 @@ impl Domino {
     }
 }
 
-impl Default for Domino {
-    fn default() -> Self {
-        Domino { 
-            dir: Direction::None, head_pos: (0, 0),
-            head: false, tail: false, offset: 0
-        }
-    }
-}
-
 struct AztecWriter {
     size: usize,
     layers: usize,
@@ -91,8 +88,9 @@ impl AztecWriter {
                 raw_size + 2 * (((raw_size - 1) / 2 - 1) / 15)
             }
         };
-        let domino_count = (raw_size * raw_size - bullseye_size * bullseye_size) / 2;
-        let mut dominos = vec![Domino::default(); domino_count];
+        // Compute the expected number of dominos in the final Aztec Code
+        let len = (raw_size * raw_size - bullseye_size * bullseye_size) / 2;
+        let mut dominos = vec![Domino::default(); len];
 
         if compact {
             let mut idx = 0;
@@ -267,12 +265,11 @@ impl AztecWriter {
 impl Display for AztecWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut blocks = vec![(0usize, "##"); self.size * self.size];
-
         let mut code = AztecCode::new(self.compact, self.size);
 
         for (i, domino) in self.dominos.iter().enumerate() {
             if domino.dir == Direction::None {
-                println!("found empty domino at idx {}", i);
+                writeln!(f, "found empty domino at idx {}", i)?;
                 continue;
             }
             let (row1, col1) = domino.head();
@@ -283,13 +280,13 @@ impl Display for AztecWriter {
             let color = i % 8;
             let (_, current) = blocks[idx1];
             if current != "##" {
-                println!("head collision detected");
+                writeln!(f, "head collision detected")?;
                 blocks[row2 * self.size + col2] = (color, "@@");
                 continue;
             }
             let (_, current) = blocks[row2 * self.size + col2];
             if current != "##" {
-                println!("tail collision detected");
+                writeln!(f, "tail collision detected")?;
                 blocks[row2 * self.size + col2] = (color, "$$");
                 continue;
             }
@@ -541,10 +538,9 @@ impl AztecCodeBuilder {
             123 => (Word::Punc(29), Mode::Punctuation), // {
             124 => (Word::Mixed(25), Mode::Mixed), // |
             125 => (Word::Punc(30), Mode::Punctuation), // } 
-            126 => (Word::Mixed(26), Mode::Mixed), // ~
-            127 => (Word::Mixed(27), Mode::Mixed), // DEL
-            _ => panic!("Character not supported `{}` (code: {})"
-                , c.escape_default(), c as u8)
+            126..=127 => (Word::Mixed(c as u8 - 100), Mode::Mixed), // ~ -> DEL
+            _ => panic!("Character not supported `{}` (code: {})",
+                c.escape_default(), c as u8)
         }
     }
 
@@ -598,9 +594,7 @@ impl AztecCodeBuilder {
     /// the end of bit string
     fn append_bits(&self, bitstr: &mut Vec<bool>, byte: u8, bits: u8)  {
         assert!(bits <= 8);
-        for bit in (0..bits).rev() {
-            bitstr.push(((byte >> bit) & 1) == 1);
-        }
+        bitstr.extend((0..bits).rev().map(|bit| ((byte >> bit) & 1) == 1));
     }
 
     /// Converts and concatenates all words to a bit string using their binary
@@ -709,8 +703,7 @@ impl AztecCodeBuilder {
         for i in (0..l).step_by(size) {
             let mut val = 0;
             for j in 0..size {
-                val <<= 1;
-                val |= bitstr[i + j] as usize;
+                val = (val << 1) | bitstr[i + j] as usize;
             }
             bytes.push(val);
         }
@@ -757,9 +750,7 @@ impl AztecCodeBuilder {
         }
 
         let start_align = (bits_in_layers % codeword_size) / 2;
-        println!("layers: {}", layers);
         let mut writer = AztecWriter::new(codewords, layers, start_align);
-        println!("{}", writer);
         writer.fill(&bitstr);
         writer.into_aztec()
     }
