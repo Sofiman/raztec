@@ -1,6 +1,7 @@
 use std::{ops::{Add, Sub, Mul, Div, Shl, Index}, fmt::Display, isize};
 use super::gf::*;
 
+#[derive(Clone)]
 pub struct GFPoly<'a> {
     // index corresponds to the power of x
     // example: coeffs[0] is equal to b in ax + b
@@ -57,14 +58,6 @@ impl<'a> Index<usize> for GFPoly<'a> {
         } else {
             &self.coeffs[index]
         }
-    }
-}
-
-impl Clone for GFPoly<'_> {
-    fn clone(&self) -> Self {
-        let mut coeffs = Vec::with_capacity(self.coeffs.len());
-        coeffs.extend(&self.coeffs);
-        GFPoly { zero: self.zero, coeffs }
     }
 }
 
@@ -183,26 +176,25 @@ impl<'a> Div for GFPoly<'a> {
         }
         let mut deg_r = self.deg();
         if deg_r < 0 {
-            let zero1 =  GFPoly { zero: self.zero, coeffs: Vec::new() };
-            let zero2 =  GFPoly { zero: self.zero, coeffs: Vec::new() };
+            let zero1 = GFPoly { zero: self.zero, coeffs: Vec::new() };
+            let zero2 = GFPoly { zero: self.zero, coeffs: Vec::new() };
             return (zero1, zero2);
         }
         if deg_r < deg_d {
             panic!("The degree of the dividend must be greater or equal to the degree of the divisor");
         }
         let mut q = GFPoly {
-            zero: self.zero, 
+            zero: self.zero,
             coeffs: vec![self.zero; self.coeffs.len()]
         };
         let mut r = self;
-        let d = q.clone() + rhs;
 
         while deg_r >= deg_d {
             let lead = (deg_r - deg_d) as usize;
             let coef = r[deg_r as usize];
-            let divisor = (d.clone() << lead) * coef;
+            let divisor = (rhs.clone() << lead) * coef;
             q.coeffs[lead] = q.coeffs[lead] + coef;
-            r = r - divisor.clone();
+            r = r - divisor;
             deg_r = r.deg();
         }
 
