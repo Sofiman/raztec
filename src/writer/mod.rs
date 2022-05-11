@@ -464,6 +464,27 @@ impl AztecCodeBuilder {
         let mut chars = text.chars();
         let mut prev_word = self.process_char(chars.next().unwrap());
         for c in chars {
+            if c == '\n' || c == ' ' {
+                match (c, prev_word) {
+                    ('\n', (Word::Punc(1), Mode::Punctuation)) => {
+                        prev_word = (Word::Punc(2), Mode::Punctuation);
+                        continue;
+                    },
+                    (' ', (Word::Punc(19), Mode::Punctuation)) => {
+                        prev_word = (Word::Punc(3), Mode::Punctuation);
+                        continue;
+                    },
+                    (' ', (Word::Punc(17), Mode::Punctuation)) => {
+                        prev_word = (Word::Punc(4), Mode::Punctuation);
+                        continue;
+                    },
+                    (' ', (Word::Punc(21), Mode::Punctuation)) => {
+                        prev_word = (Word::Punc(5), Mode::Punctuation);
+                        continue;
+                    },
+                    _ => ()
+                }
+            }
             let next = self.process_char(c);
             self.push_in(prev_word, Some(next));
             prev_word = next;
@@ -477,9 +498,22 @@ impl AztecCodeBuilder {
     /// the builder.
     fn process_char(&self, c: char) -> (Word, Mode) {
         match c as u8 {
-            65..=90 => (Word::upper_letter(c), Mode::Upper),
-            97..=122 => (Word::lower_letter(c), Mode::Lower),
-            48..=57 => (Word::digit(c), Mode::Digit),
+            1..=12 => (Word::Mixed(c as u8 + 1), Mode::Mixed),
+            13 => { // \r
+                if self.current_mode != Mode::Mixed {
+                    (Word::Punc(1), Mode::Punctuation)
+                } else {
+                    (Word::Mixed(14), Mode::Mixed)
+                }
+            },
+            27..=31 => (Word::Mixed(c as u8 - 27 + 15), Mode::Mixed),
+            32 => { // space
+                if self.current_mode != Mode::Punctuation {
+                    (Word::new(self.current_mode, 1), self.current_mode)
+                } else {
+                    (Word::Char(1), Mode::Upper)
+                }
+            },
             44 => { // ,
                 if self.current_mode != Mode::Digit {
                     (Word::Punc(17), Mode::Punctuation)
@@ -495,43 +529,29 @@ impl AztecCodeBuilder {
                 }
             },
             33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
+            48..=57 => (Word::digit(c), Mode::Digit),
             58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
-            91 => (Word::Punc(27), Mode::Punctuation), // [
-            93 => (Word::Punc(28), Mode::Punctuation), // ]
-            123 => (Word::Punc(29), Mode::Punctuation), // {
-            125 => (Word::Punc(30), Mode::Punctuation), // } 
             64 => (Word::Mixed(20), Mode::Mixed), // @
+            65..=90 => (Word::upper_letter(c), Mode::Upper),
+            91 => (Word::Punc(27), Mode::Punctuation), // [
             92 => (Word::Mixed(21), Mode::Mixed), // \
+            93 => (Word::Punc(28), Mode::Punctuation), // ]
             94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
+            97..=122 => (Word::lower_letter(c), Mode::Lower),
+            123 => (Word::Punc(29), Mode::Punctuation), // {
+            124 => (Word::Mixed(25), Mode::Mixed), // |
+            125 => (Word::Punc(30), Mode::Punctuation), // } 
             126 => (Word::Mixed(26), Mode::Mixed), // ~
-            10 => (Word::Punc(1), Mode::Punctuation), // \n
-            32 => { // space
-                if self.current_mode != Mode::Punctuation {
-                    (Word::new(self.current_mode, 1), self.current_mode)
-                } else {
-                    (Word::Char(1), Mode::Upper)
-                }
-            },
-            _ => panic!("Character not supported `{}`", c)
+            127 => (Word::Mixed(27), Mode::Mixed), // DEL
+            _ => panic!("Character not supported `{}` (code: {})"
+                , c.escape_default(), c as u8)
         }
     }
 
     pub fn append_eci(&mut self, code: u8) -> &mut Self {
-        let mut n = 0;
-        let mut c = code;
-        let mut mask = 1;
-        while c > 0 {
-            n += 1;
-            c /= 10;
-            mask *= 10;
-        }
-        self.push_in((Word::Flg(n), Mode::Punctuation), None);
-        mask /= 10;
-        while n > 0 {
-            self.words.push(Word::new(Mode::Digit, (code / mask) % 10));
-            mask /= 10;
-            n -= 1;
-        }
+        let repr = code.to_string();
+        self.push_in((Word::Flg(repr.len() as u8), Mode::Punctuation), None);
+        self.words.extend(repr.chars().map(Word::digit));
         self
     }
 
@@ -595,11 +615,14 @@ impl AztecCodeBuilder {
                     self.append_bits(&mut bitstr, (len >> 8) as u8, 3);
                     self.append_bits(&mut bitstr, (len & 255) as u8, 8);
                 },
+                Word::Flg(n) => {
+                    self.append_bits(&mut bitstr, 0, 5);
+                    self.append_bits(&mut bitstr, n, 3)
+                },
                 Word::Byte(x) => self.append_bits(&mut bitstr, x, 8),
                 Word::Digit(x) => self.append_bits(&mut bitstr, x, 4),
                 Word::Char(x) | Word::Punc(x) | Word::Mixed(x) 
-                    => self.append_bits(&mut bitstr, x, 5),
-                Word::Flg(n) => self.append_bits(&mut bitstr, n, 3)
+                    => self.append_bits(&mut bitstr, x, 5)
             }
         }
         bitstr
@@ -631,7 +654,8 @@ impl AztecCodeBuilder {
     /// codeword full of ones. In that case, the last padding bit is a zero
     /// instead of a one (bit stuffing).
     fn add_padding(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
-        let remaining = bitstr.len() % codeword_size;
+        let len = bitstr.len();
+        let remaining = len % codeword_size;
         if remaining == 0 {
             return;
         }
@@ -642,7 +666,6 @@ impl AztecCodeBuilder {
         }
 
         // check if the last codeword is all ones to do one bit stuffing
-        let len = bitstr.len();
         let mut i = len - codeword_size;
         let limit = i + remaining;
         while i <= limit && bitstr[i] {
@@ -698,7 +721,6 @@ impl AztecCodeBuilder {
     /// of the builder can be changed using `append` functions. Panics if the
     /// builder's content can not fit in a valid Aztec Code.
     pub fn build(&self) -> AztecCode {
-        println!("{:?}", self.words);
         let mut bitstr = self.to_bit_string();
 
         // Reed Solomon Config

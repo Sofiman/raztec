@@ -20,16 +20,20 @@ fn main() {
     let code = AztecCodeBuilder::new()
         .append("Test Lower Case Toggle For Shift").build();
     */
+    let code = AztecCodeBuilder::new()
+        .append("!\"#$%&'()*+,-./:;<=>?[]{}@\\^_`|~\n").build();
     /*
     let code = AztecCodeBuilder::new()
         .append("IN FULL-RANGE AZTEC CODE SYMBOLS, THE REFERENCE GRID SERVES AS AN EXTENSION OF THE FINDER PATTERN TO HELP ACCURATELY MAP").build();
     */
+    /*
     let code = AztecCodeBuilder::new()
-        .append_bytes(&[182])
-        .append_eci(7) // \000020
+        //.append_bytes(&[182])
+        .append_eci(26) // \000020
         /*
         .append_bytes("ワンピース".as_bytes())*/
         .append_bytes(&[182]).build();
+    */
     println!("Successfully generated Aztec Code in {:?}", start.elapsed());
     println!("{}", code);
 }
