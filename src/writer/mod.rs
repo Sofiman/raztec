@@ -450,14 +450,14 @@ impl AztecCodeBuilder {
     /// Appends text and convert it to the Aztec Code format to the future
     /// Aztec Code. Note that the size of the final Aztec Code is not known
     /// until the `build` function is called. Panics if there is not supported
-    /// characters in the string (to be changed).
+    /// characters in the string (Characters must be in ASCII-128).
     pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
         if text.is_empty() {
             return self;
         }
         let mut chars = text.chars();
-        let mut prev_word = self.process_char(chars.next().unwrap());
-        for c in chars {
+        let mut prev_word = self.process_char(chars.next().unwrap(), 0);
+        for (i, c) in chars.enumerate() {
             if c == '\n' || c == ' ' {
                 match (c, prev_word) {
                     ('\n', (Word::Punc(1), Mode::Punctuation)) => {
@@ -479,7 +479,7 @@ impl AztecCodeBuilder {
                     _ => ()
                 }
             }
-            let next = self.process_char(c);
+            let next = self.process_char(c, i + 1);
             self.push_in(prev_word, Some(next));
             prev_word = next;
         }
@@ -490,8 +490,8 @@ impl AztecCodeBuilder {
     /// Converts the provided char into its translation in the Aztec code
     /// Character set. This convertion takes into account the current mode of
     /// the builder.
-    fn process_char(&self, c: char) -> (Word, Mode) {
-        match c as u8 {
+    fn process_char(&self, c: char, idx: usize) -> (Word, Mode) {
+        match c as u32 {
             1..=12 => (Word::Mixed(c as u8 + 1), Mode::Mixed),
             13 => { // \r
                 if self.current_mode != Mode::Mixed {
@@ -536,8 +536,8 @@ impl AztecCodeBuilder {
             124 => (Word::Mixed(25), Mode::Mixed), // |
             125 => (Word::Punc(30), Mode::Punctuation), // } 
             126..=127 => (Word::Mixed(c as u8 - 100), Mode::Mixed), // ~ -> DEL
-            _ => panic!("Character not supported `{}` (code: {})",
-                c.escape_default(), c as u8)
+            x => panic!("Character not supported `{}` (code: {}) at index {}",
+                c.escape_default(), x, idx)
         }
     }
 
