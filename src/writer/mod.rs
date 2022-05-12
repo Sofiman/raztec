@@ -112,7 +112,7 @@ impl AztecWriter {
             let mid = (size / 2) % 16;
             let mut idx = 0;
             let mut skips = 0;
-            let mut dpl = size - 3 - (size - 3) / 15; // domino per line
+            let mut dpl = (layers - 5) * 4 + 32; // domino per line
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
@@ -136,21 +136,18 @@ impl AztecWriter {
                             (start + offset + skips, start + skips));
                         domino.check_splitting(mid);
                         dominos[j] = domino;
-                        let mut domino = Domino::left(
-                            (end - offset - skips, end - skips));
-                        domino.check_splitting(mid);
-                        dominos[j + dpl * 2] = domino;
-                        j += 1;
-                    }
-                }
-                j = idx;
-                for offset in 0..(limit - skips * 2) {
-                    if (start + offset + skips) % 16 != mid {
-                        let mut domino = Domino::up(
+
+                        domino = Domino::up(
                             (end - skips, start + offset + skips));
                         domino.check_splitting(mid);
                         dominos[j + dpl] = domino;
-                        let mut domino = Domino::down(
+
+                        domino = Domino::left(
+                            (end - offset - skips, end - skips));
+                        domino.check_splitting(mid);
+                        dominos[j + dpl * 2] = domino;
+
+                        domino = Domino::down(
                             (start + skips, end - offset - skips));
                         domino.check_splitting(mid);
                         dominos[j + dpl * 3] = domino;
