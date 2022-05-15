@@ -11,10 +11,15 @@ The Aztec code generator comes as a Builder:
 ```Rust
 use raztec::writer::AztecCodeBuilder;
 let code = AztecCodeBuilder::new().error_correction(23)
-    .append("Hello").append(", ").append("World!").build();
+    .append("Hello").append(", ").append("World!").build().unwrap();
 ```
+Please note that the `build` function returns a **Result** as the Aztec Code
+generation may fail.
+
 This gives you an AztecCode struct that have the Index IndexMut and Display
 traits. You can get the current side size with `code.size()`.
+You can convert the AztecCode struct into a pixel array using `to_image`,
+`to_rgb8` and `to_mono8`.
 
 There is currently no builtin Aztec code reader.
 
@@ -24,6 +29,6 @@ There is currently no builtin Aztec code reader.
 
 ## TODO
 
-- Add support for larger Aztec Codes (full-size)
-- Add support for ECI characters
 - Implement an Aztec code reader
+- Add more documentation
+- Improve speed of big Aztec Code generation

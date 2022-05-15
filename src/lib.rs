@@ -8,6 +8,7 @@ pub mod reed_solomon;
 use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 
+#[derive(Clone, PartialEq, Eq)]
 pub struct AztecCode {
     size: usize,
     compact: bool,
