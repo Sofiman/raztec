@@ -24,7 +24,7 @@ impl AztecCode {
             panic!("Full-size Aztec Code has a minimum size of 15x15");
         }
 
-        let image = vec![false; size*size];
+        let image = vec![false; size * size];
         let mut code = AztecCode { size, compact, image };
         code.build_finder_pattern();
         code
@@ -79,6 +79,7 @@ impl AztecCode {
         }
     }
 
+    /// Invert all Aztec Code cells' state
     pub fn invert(&mut self) {
         for px in self.image.iter_mut() {
             *px = !*px;
@@ -93,17 +94,38 @@ impl AztecCode {
         self.compact
     }
 
-    pub fn to_rgb(&self, module_size: usize) -> Vec<u8> {
-        let side = self.size * module_size;
-        let mut pixels = vec![0; side * side];
+    /// Convert the AztecCode to an image
+    ///
+    /// # Arguments
+    ///
+    /// * `module_size` - Scaling factor of each Aztec Code cell
+    /// * `empty_color` - Color that represents a `false` (Normally white)
+    /// * `filled_color` - Color that represents a `true` (Normally black)
+    pub fn to_image<C: Clone>(&self, module_size: usize,
+        empty_color: C, filled_color: C) -> Vec<C> {
+        let size = self.size;
+        let side = size * module_size;
+        let mut pixels = vec![empty_color.clone(); side * side];
         for i in 0..side {
             for j in 0..side {
-                let bit = self.image[(i / module_size) * self.size + j / module_size];
-                pixels[i * side + j] = if bit { 0 } else { 255 };
+                let b = self.image[(i / module_size) * size + j / module_size];
+                pixels[i * side + j] = if b {
+                    filled_color.clone() 
+                } else { 
+                    empty_color.clone()
+                };
             }
         }
 
         pixels
+    }
+
+    pub fn to_rgb8(&self, module_size: usize) -> Vec<u32> {
+        self.to_image(module_size, 0xffffff, 0)
+    }
+
+    pub fn to_mono8(&self, module_size: usize) -> Vec<u8> {
+        self.to_image(module_size, 255, 0)
     }
 }
 

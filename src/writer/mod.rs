@@ -27,19 +27,19 @@ struct Domino {
 impl Domino {
 
     fn down(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Down, head: false, tail: false, offset: 0 }
+        Self { head_pos, dir: Direction::Down,  ..Default::default() }
     }
 
     fn left(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Left, head: false, tail: false, offset: 0 }
+        Self { head_pos, dir: Direction::Left,  ..Default::default() }
     }
 
     fn up(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Up, head: false, tail: false, offset: 0 }
+        Self { head_pos, dir: Direction::Up,    ..Default::default() }
     }
 
     fn right(head_pos: (usize, usize)) -> Self {
-        Self { head_pos, dir: Direction::Right, head: false, tail: false, offset: 0 }
+        Self { head_pos, dir: Direction::Right, ..Default::default() }
     }
 
     fn head(&self) -> (usize, usize) {
@@ -49,7 +49,8 @@ impl Domino {
     fn tail(&self) -> (usize, usize) {
         let (row, col) = self.head_pos;
         match &self.dir {
-            Direction::None => panic!("Trying to access the tail of an empty domino"),
+            Direction::None  =>
+                panic!("Trying to access the tail of an empty domino"),
             Direction::Down  => (row + 1 + self.offset, col),
             Direction::Left  => (row, col - 1 - self.offset),
             Direction::Up    => (row - 1 - self.offset, col),
@@ -122,8 +123,7 @@ impl AztecWriter {
                     skips += 1;
                 }
 
-                let mut delta = 0;
-                // check if any domino will be cut in half
+                let mut delta = 0; // check if any domino will be cut in half
                 if (start + skips + 1) % 16 == mid {
                     delta = 1;
                     limit -= 1;
@@ -204,10 +204,10 @@ impl AztecWriter {
                 ], 5))
             } else {
                 (40, encoder.generate_check_codes(&[
-                     layers >> 1,
-                     ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
-                     (words & 0b00011110000) >> 4,
-                     words & 0b00000001111,
+                    layers >> 1,
+                    ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
+                    (words & 0b00011110000) >> 4,
+                    words & 0b00000001111,
                 ], 6))
             };
 
@@ -234,10 +234,10 @@ impl AztecWriter {
         let middle = self.size / 2;
         let start_idx = middle - 5;
         for i in 0..7 {
-            code[(start_idx, start_idx + 2 + i)]  = service_message[i     ];
+            code[(start_idx,  start_idx + 2 + i)] = service_message[i     ];
             code[(start_idx + 2 + i, middle + 5)] = service_message[i +  7];
-            code[(middle + 5, middle + 3 - i)]    = service_message[i + 14];
-            code[(middle + 3 - i, start_idx)]     = service_message[i + 21];
+            code[(middle + 5,    middle + 3 - i)] = service_message[i + 14];
+            code[(middle + 3 - i,     start_idx)] = service_message[i + 21];
         }
     }
 
@@ -247,14 +247,14 @@ impl AztecWriter {
         let start_idx = middle - 7;
         let end_idx = middle + 7;
         for i in 0..5 {
-            code[(start_idx, start_idx + 2 + i)]  = service_message[i     ];
-            code[(start_idx, start_idx + 8 + i)]  = service_message[i +  5];
-            code[(start_idx + 2 + i, end_idx)]    = service_message[i + 10];
-            code[(start_idx + 8 + i, end_idx)]    = service_message[i + 15];
-            code[(end_idx, middle + 5 - i)]       = service_message[i + 20];
-            code[(end_idx, middle - 1 - i)]       = service_message[i + 25];
-            code[(middle + 5 - i, start_idx)]     = service_message[i + 30];
-            code[(middle - 1 - i, start_idx)]     = service_message[i + 35];
+            code[(start_idx, start_idx + 2 + i)] = service_message[i     ];
+            code[(start_idx, start_idx + 8 + i)] = service_message[i +  5];
+            code[(start_idx + 2 + i,   end_idx)] = service_message[i + 10];
+            code[(start_idx + 8 + i,   end_idx)] = service_message[i + 15];
+            code[(end_idx,      middle + 5 - i)] = service_message[i + 20];
+            code[(end_idx,      middle - 1 - i)] = service_message[i + 25];
+            code[(middle + 5 - i,    start_idx)] = service_message[i + 30];
+            code[(middle - 1 - i,    start_idx)] = service_message[i + 35];
         }
     }
 }
@@ -292,7 +292,7 @@ impl Display for AztecWriter {
                 Direction::Up    => blocks[idx1] = (color, "^^"),
                 Direction::Left  => blocks[idx1] = (color, "<-"),
                 Direction::Down  => blocks[idx1] = (color, "vv"),
-                Direction::None => unreachable!()
+                Direction::None  => unreachable!()
             }
             blocks[row2 * self.size + col2] = (color, "██");
         }
@@ -368,10 +368,9 @@ enum Word {
 impl Word {
     fn new(kind: Mode, c: u8) -> Self {
         match kind {
-            Mode::Upper | Mode::Lower => Word::Char(c),
-            Mode::Mixed => Word::Char(c),
-            Mode::Digit => Word::Digit(c),
-            Mode::Punctuation => Word::Punc(c)
+            Mode::Upper | Mode::Lower | Mode::Mixed => Word::Char(c),
+            Mode::Digit                             => Word::Digit(c),
+            Mode::Punctuation                       => Word::Punc(c)
         }
     }
 
@@ -404,8 +403,7 @@ impl AztecCodeBuilder {
     }
 
     /// Sets the error correction rate percentage of the final Aztec Code.
-    pub fn error_correction(&mut self, rate: usize) 
-        -> &mut AztecCodeBuilder {
+    pub fn error_correction(&mut self, rate: usize) -> &mut AztecCodeBuilder {
         if !(5..=95).contains(&rate) {
             panic!("Invalid error correction rate (5-95)");
         }
@@ -603,14 +601,14 @@ impl AztecCodeBuilder {
         for &word in self.words.iter() {
             match word {
                 Word::Size(len) => {
-                    self.append_bits(&mut bitstr, (len >> 8) as u8, 3);
-                    self.append_bits(&mut bitstr, (len & 255) as u8, 8);
+                    self.append_bits(&mut bitstr, (len >>  8) as u8, 3);
+                    self.append_bits(&mut bitstr, (len & 255) as u8, 8)
                 },
                 Word::Flg(n) => {
                     self.append_bits(&mut bitstr, 0, 5);
                     self.append_bits(&mut bitstr, n, 3)
                 },
-                Word::Byte(x) => self.append_bits(&mut bitstr, x, 8),
+                Word::Byte(x)  => self.append_bits(&mut bitstr, x, 8),
                 Word::Digit(x) => self.append_bits(&mut bitstr, x, 4),
                 Word::Char(x) | Word::Punc(x) | Word::Mixed(x) 
                     => self.append_bits(&mut bitstr, x, 5)
@@ -645,8 +643,7 @@ impl AztecCodeBuilder {
     /// codeword full of ones. In that case, the last padding bit is a zero
     /// instead of a one (bit stuffing).
     fn add_padding(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
-        let len = bitstr.len();
-        let remaining = len % codeword_size;
+        let remaining = bitstr.len() % codeword_size;
         if remaining == 0 {
             return;
         }
@@ -657,9 +654,10 @@ impl AztecCodeBuilder {
         }
 
         // check if the last codeword is all ones to do one bit stuffing
+        let len = bitstr.len();
         let mut i = len - codeword_size;
         let limit = i + remaining;
-        while i <= limit && bitstr[i] {
+        while i < limit && bitstr[i] {
             i += 1;
         }
         if i == limit {
@@ -710,18 +708,19 @@ impl AztecCodeBuilder {
     /// Generates an AztecCode from the current state of the builder. The state
     /// of the builder can be changed using `append` functions. Panics if the
     /// builder's content can not fit in a valid Aztec Code.
-    pub fn build(&self) -> AztecCode {
+    pub fn build(&self) -> Result<AztecCode, String> {
         let mut bitstr = self.to_bit_string();
 
         // Reed Solomon Config
         let (layers, bits_in_layers) =
             self.find_nb_layers(bitstr.len() + bitstr.len() * self.ecr / 100);
         let (codeword_size, prim) = match layers {
-            1..=2   => ( 6,      0b1000011),
-            3..=8   => ( 8,    0b100101101),
-            9..=22  => (10,   0b10000001001),
+             1..=2  => ( 6,       0b1000011),
+             3..=8  => ( 8,     0b100101101),
+             9..=22 => (10,   0b10000001001),
             23..=32 => (12, 0b1000001101001),
-            _ => panic!("Aztec code with {} layers is not supported", layers)
+            _ => return Err(
+                format!("Aztec code with {} layers is not supported", layers))
         };
 
         self.bit_stuffing(&mut bitstr, codeword_size);
@@ -735,7 +734,7 @@ impl AztecCodeBuilder {
         let check_words = rs.generate_check_codes(&words, to_fill);
         if codeword_size > 8 {
             for check_word in check_words.iter().skip(words.len()) {
-                self.append_bits(&mut bitstr, (check_word >> 8) as u8, 
+                self.append_bits(&mut bitstr, (check_word >> 8) as u8,
                     (codeword_size - 8) as u8);
                 self.append_bits(&mut bitstr, (check_word & 0xFF) as u8, 8);
             }
@@ -749,7 +748,7 @@ impl AztecCodeBuilder {
         let start_align = (bits_in_layers % codeword_size) / 2;
         let mut writer = AztecWriter::new(codewords, layers, start_align);
         writer.fill(&bitstr);
-        writer.into_aztec()
+        Ok(writer.into_aztec())
     }
 }
 
@@ -765,13 +764,14 @@ mod tests {
 
     #[test]
     fn test_bit_stuffing() {
-        let input    = "00100111001000000101001101111000010100111100101000000110";
-        let expected = "0010011100100000011010011011110000101001111001010000010110";
-        let mut bitstr:Vec<bool> = input.chars().map(|x| x == '1').collect();
+        let inp = "00100111001000000101001101111000010100111100101000000110";
+        let exp = "0010011100100000011010011011110000101001111001010000010110";
+        let mut bitstr:Vec<bool> = inp.chars().map(|x| x == '1').collect();
         let builder = AztecCodeBuilder::new();
         builder.bit_stuffing(&mut bitstr, 6);
 
-        let result = bitstr.iter().fold(String::new(), |acc, &x| acc + if x { "1" } else { "0" });
-        assert_eq!(expected, result);
+        let result = bitstr.iter().fold(String::new(), |acc, &x| acc
+            + if x { "1" } else { "0" });
+        assert_eq!(exp, result);
     }
 }

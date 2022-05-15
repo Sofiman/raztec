@@ -12,11 +12,11 @@ fn main() {
     let start = Instant::now();
     // generate the Aztec Code
     let code = AztecCodeBuilder::new()
-        .append(input.trim()).build();
+        .append(input.trim()).build().unwrap();
     println!("Successfully generated Aztec Code in {:?}", start.elapsed());
 
     // save the Aztec code as an image
-    let pixels = code.to_rgb(4);
+    let pixels = code.to_mono8(4);
     let size = code.size() * 4;
     let img = ImageBuffer::from_fn(size as u32, size as u32, |x, y| {
         image::Luma([pixels[y as usize * size + x as usize]])
