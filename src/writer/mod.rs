@@ -1,3 +1,12 @@
+//! Aztec Writer module
+//!
+//! This module contains all the necessary tools to fully generate Aztec Codes.
+//! # Examples
+//! ```rust
+//!   let code = AztecCodeBuilder::new().error_correction(50)
+//!       .append("Hello").append(", ").append_bytes("World!".as_bytes())
+//!       .build().unwrap();
+//! ```
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,8 +58,7 @@ impl Domino {
     fn tail(&self) -> (usize, usize) {
         let (row, col) = self.head_pos;
         match &self.dir {
-            Direction::None  =>
-                panic!("Trying to access the tail of an empty domino"),
+            Direction::None  => unreachable!("tail() on an empty domino"),
             Direction::Down  => (row + 1 + self.offset, col),
             Direction::Left  => (row, col - 1 - self.offset),
             Direction::Up    => (row - 1 - self.offset, col),
@@ -445,7 +453,7 @@ impl AztecCodeBuilder {
 
     /// Appends an ECI escape code to the Aztec Code.
     /// The default ECI indicator is \000003 (code = 3).
-    pub fn append_eci(&mut self, code: u16) -> &mut Self {
+    pub fn append_eci(&mut self, code: u16) -> &mut AztecCodeBuilder {
         let repr = code.to_string();
         assert!(repr.len() < 7, "ECI codes with 7+ digits are illegal");
         self.push_in((Word::Flg(repr.len() as u8), Mode::Punctuation), None);
@@ -493,19 +501,23 @@ impl AztecCodeBuilder {
         self
     }
 
+    fn poly_word(&self, accepted_mode: Mode, original: Word,
+        normal_mode: Mode, other: Word) -> (Word, Mode) {
+        if self.current_mode != accepted_mode {
+            (other, normal_mode)
+        } else {
+            (original, accepted_mode)
+        }
+    }
+
     /// Converts the provided char into its translation in the Aztec code
     /// Character set. This convertion takes into account the current mode of
     /// the builder.
     fn process_char(&self, c: char, idx: usize) -> (Word, Mode) {
         match c as u32 {
             1..=12 => (Word::Mixed(c as u8 + 1), Mode::Mixed),
-            13 => { // \r
-                if self.current_mode != Mode::Mixed {
-                    (Word::Punc(1), Mode::Punctuation)
-                } else {
-                    (Word::Mixed(14), Mode::Mixed)
-                }
-            },
+            13 => self.poly_word(Mode::Mixed, Word::Mixed(14), // \r
+                                 Mode::Punctuation, Word::Punc(1)),
             27..=31 => (Word::Mixed(c as u8 - 27 + 15), Mode::Mixed),
             32 => { // space
                 if self.current_mode != Mode::Punctuation {
@@ -514,20 +526,10 @@ impl AztecCodeBuilder {
                     (Word::Char(1), Mode::Upper)
                 }
             },
-            44 => { // ,
-                if self.current_mode != Mode::Digit {
-                    (Word::Punc(17), Mode::Punctuation)
-                } else {
-                    (Word::Digit(12), Mode::Digit)
-                }
-            },
-            46 => { // .
-                if self.current_mode != Mode::Digit {
-                    (Word::Punc(19), Mode::Punctuation)
-                } else {
-                    (Word::Digit(13), Mode::Digit)
-                }
-            },
+            44 => self.poly_word(Mode::Digit, Word::Digit(12), // ,
+                                 Mode::Punctuation, Word::Punc(17)),
+            46 => self.poly_word(Mode::Digit, Word::Digit(13), // .
+                                 Mode::Punctuation, Word::Punc(19)),
             33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
             48..=57 => (Word::digit(c), Mode::Digit),
             58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
@@ -551,7 +553,7 @@ impl AztecCodeBuilder {
     /// function. All the mode switching logic is done here. The new mode is
     /// generated using the current mode of the builder, the expected_mode and
     /// the mode of the next (Word, Mode) couple (if present).
-    fn push_in(&mut self, (word, expected_mode): (Word, Mode), 
+    fn push_in(&mut self, (word, expected_mode): (Word, Mode),
         next: Option<(Word, Mode)>) {
         let mut cur_mode = self.current_mode;
 
@@ -587,7 +589,7 @@ impl AztecCodeBuilder {
     }
 
     /// Copies `bits` bits starting from the MSB from `byte` to
-    /// the end of bit string
+    /// the end of bit string. Note that `bits` should not exeed 8 (max 1b).
     fn append_bits(&self, bitstr: &mut Vec<bool>, byte: u8, bits: u8)  {
         bitstr.extend((0..bits).rev().map(|bit| ((byte >> bit) & 1) == 1));
     }
@@ -649,9 +651,7 @@ impl AztecCodeBuilder {
         }
 
         // pad the last bits by 1s to next codeword boundary
-        for _i in 0..(codeword_size - remaining) {
-            bitstr.push(true);
-        }
+        bitstr.extend(std::iter::repeat(true).take(codeword_size - remaining));
 
         // check if the last codeword is all ones to do one bit stuffing
         let len = bitstr.len();
@@ -766,7 +766,7 @@ mod tests {
     fn test_bit_stuffing() {
         let inp = "00100111001000000101001101111000010100111100101000000110";
         let exp = "0010011100100000011010011011110000101001111001010000010110";
-        let mut bitstr:Vec<bool> = inp.chars().map(|x| x == '1').collect();
+        let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
         let builder = AztecCodeBuilder::new();
         builder.bit_stuffing(&mut bitstr, 6);
 

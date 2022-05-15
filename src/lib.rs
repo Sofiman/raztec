@@ -8,6 +8,10 @@ pub mod reed_solomon;
 use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 
+/// Represents a raw Aztec Code.
+///
+/// You can preview the AztecCode in the console using the standard formatter
+/// as this struct implements the trait Display.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AztecCode {
     size: usize,
@@ -16,13 +20,21 @@ pub struct AztecCode {
 }
 
 impl AztecCode {
+
+    /// Create a new empty Aztec Code (with the bullseye).
+    ///
+    /// # Arguments
+    ///
+    /// * `compact` - Indicates if this Aztec Code is compact or full-size
+    /// * `size` - Aztec Code's side size, compact Aztec Codes have a minimum
+    /// size of 11x11 and full-size Aztec Codes of 15x15
     pub fn new(compact: bool, size: usize) -> AztecCode {
         if compact {
             if size < 11 {
-                panic!("Compact Aztec Code has a minimum size of 11x11");
+                panic!("Compact Aztec Codes have a minimum size of 11x11");
             }
         } else if size < 15 {
-            panic!("Full-size Aztec Code has a minimum size of 15x15");
+            panic!("Full-size Aztec Codes have a minimum size of 15x15");
         }
 
         let image = vec![false; size * size];
@@ -80,17 +92,19 @@ impl AztecCode {
         }
     }
 
-    /// Invert all Aztec Code cells' state
+    /// Invert all Aztec Code cells' state.
     pub fn invert(&mut self) {
         for px in self.image.iter_mut() {
             *px = !*px;
         }
     }
 
+    /// Returns the size of the side of this Aztec Code.
     pub fn size(&self) -> usize {
         self.size
     }
 
+    /// Returns true if this is a compact Aztec Code, false otherwise.
     pub fn is_compact(&self) -> bool {
         self.compact
     }
@@ -121,10 +135,15 @@ impl AztecCode {
         pixels
     }
 
+    /// Creates a new RGB8 image from the raw Aztec Code data. Black represent
+    /// trues and White represent falses.
     pub fn to_rgb8(&self, module_size: usize) -> Vec<u32> {
         self.to_image(module_size, 0xffffff, 0)
     }
 
+
+    /// Creates a new MONO8 (black and white) image from the raw Aztec Code
+    /// data. Black represent trues and White represent falses.
     pub fn to_mono8(&self, module_size: usize) -> Vec<u8> {
         self.to_image(module_size, 255, 0)
     }
