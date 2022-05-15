@@ -2,6 +2,8 @@
 //!
 //! This module contains all the necessary tools to fully generate Aztec Codes.
 //! # Examples
+//!
+//! Here is an example of generating an AztecCode containing strings and bytes:
 //! ```rust
 //!   let code = AztecCodeBuilder::new().error_correction(50)
 //!       .append("Hello").append(", ").append_bytes("World!".as_bytes())
@@ -315,12 +317,12 @@ impl Display for AztecWriter {
 }
 
 const LATCH_TABLE: [usize; 25] = [
-// From  | To:   Upper      Lower      Mixed   Punct     Digit
-/* Upper */     32767,        28,        29,     0,         30,
-/* Lower */(29<<5)|29,     32767,        29,     0,         30,
-/* Mixed */        29,        28,     32767,     0, (30<<5)|29,
-/* Punct */        31,(28<<5)|31,(29<<5)|31, 32767, (30<<5)|31,
-/* Digit */        14,(28<<4)|14,(29<<4)|14,     0,      32767,
+// From  | To:  Upper      Lower      Mixed              Punct       Digit
+/* Upper */     32767,        28,        29,        (30<<5)|29,         30,
+/* Lower */(29<<5)|29,     32767,        29,        (30<<5)|29,         30,
+/* Mixed */        29,        28,     32767,                30, (30<<5)|29,
+/* Punct */        31,(28<<5)|31,(29<<5)|31,             32767, (30<<5)|31,
+/* Digit */        14,(28<<4)|14,(29<<4)|14,(30<<9)|(29<<4)|14,      32767,
 ];
 
 const SHIFT_TABLE: [usize; 25] = [
@@ -562,26 +564,24 @@ impl AztecCodeBuilder {
             let switch = cur_mode.val() * 5 + expected_mode.val();
             let mut code = LATCH_TABLE[switch];
 
-            if expected_mode != Mode::Punctuation {
-                self.current_mode = expected_mode;
-            }
-            if let Some((_next_word, next_mode)) = next {
-                // see if we can do a shift instead of a latch
-                if next_mode == cur_mode {
-                    let shift = SHIFT_TABLE[switch];
-                    if shift != 32767 {
-                        code = shift;
-                        // go back to the last mode immediatly
-                        self.current_mode = cur_mode;
-                    }
+            self.current_mode = expected_mode;
+            let (_, next_mode) = next.unwrap_or((word, expected_mode));
+            // see if we can do a shift instead of a latch
+            if next_mode == cur_mode {
+                let shift = SHIFT_TABLE[switch];
+                if shift != 32767 {
+                    code = shift;
+                    // go back to the last mode immediatly
+                    self.current_mode = cur_mode;
                 }
             }
 
-            let (limit, shift) = cur_mode.capacity();
-            if code > limit { // at most 2 words are needed to change mode
+            let (mut limit, mut shift) = cur_mode.capacity();
+            while code > limit { // at most 2 words are needed to change mode
                 self.words.push(Word::new(cur_mode, (code & limit) as u8));
                 code >>= shift;
                 cur_mode = Mode::Upper; // force next word's bit len to 5 bits
+                (limit, shift) = cur_mode.capacity();
             }
             self.words.push(Word::new(cur_mode, code as u8));
         }
