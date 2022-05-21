@@ -625,9 +625,11 @@ impl AztecCodeBuilder {
     /// Example: `00000x$` and `11111x$` 
     ///           where `$` can be a 0 or 1 and `x` the inserted bit.
     fn bit_stuffing(&self, bitstr: &mut Vec<bool>, codeword_size: usize) {
+        if bitstr.len() < codeword_size {
+            return;
+        }
         let mut i = 0;
-        let l = bitstr.len() - codeword_size;
-        let limit = codeword_size - 1;
+        let (l, limit) = (bitstr.len() - codeword_size, codeword_size - 1);
         while i < l {
             let first = bitstr[i];
             let mut j = 1;
@@ -768,10 +770,8 @@ mod tests {
         let inp = "00100111001000000101001101111000010100111100101000000110";
         let exp = "0010011100100000011010011011110000101001111001010000010110";
         let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
         AztecCodeBuilder::new().bit_stuffing(&mut bitstr, 6);
-
-        let result = bitstr.iter().fold(String::new(), |acc, &x| acc
-            + if x { "1" } else { "0" });
-        assert_eq!(exp, result);
+        assert_eq!(expected, bitstr);
     }
 }
