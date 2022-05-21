@@ -1,7 +1,7 @@
 use std::{ops::{Add, Sub, Mul, Div}, fmt::Display};
 use super::{poly::Polynomial, gf_poly::GFPoly};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct GF {
     order: u8,
     size: usize,
@@ -107,6 +107,12 @@ impl GF {
     }
 }
 
+impl PartialEq for GF {
+    fn eq(&self, other: &Self) -> bool {
+        self.order == other.order
+    }
+}
+
 impl Display for GF {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "GF(size: {}, primitive: {})", 
@@ -114,7 +120,7 @@ impl Display for GF {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Copy, PartialEq)]
 pub struct GFNum<'a> {
     gf: &'a GF,
     val: usize
@@ -139,6 +145,12 @@ impl<'a> GFNum<'a> {
 
     pub fn zero(gf: &'a GF) -> GFNum<'a> {
         GFNum { gf, val: 0 }
+    }
+}
+
+impl<'a> Clone for GFNum<'a> {
+    fn clone(&self) -> Self {
+        GFNum { gf: self.gf, val: self.val }
     }
 }
 

@@ -5,6 +5,7 @@
 //!
 //! Here is an example of generating an AztecCode containing strings and bytes:
 //! ```rust
+//!   use raztec::writer::AztecCodeBuilder;
 //!   let code = AztecCodeBuilder::new().error_correction(50)
 //!       .append("Hello").append(", ").append_bytes("World!".as_bytes())
 //!       .build().unwrap();
@@ -767,8 +768,7 @@ mod tests {
         let inp = "00100111001000000101001101111000010100111100101000000110";
         let exp = "0010011100100000011010011011110000101001111001010000010110";
         let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
-        let builder = AztecCodeBuilder::new();
-        builder.bit_stuffing(&mut bitstr, 6);
+        AztecCodeBuilder::new().bit_stuffing(&mut bitstr, 6);
 
         let result = bitstr.iter().fold(String::new(), |acc, &x| acc
             + if x { "1" } else { "0" });
