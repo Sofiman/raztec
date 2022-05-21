@@ -93,15 +93,17 @@ impl<'a> Add for GFPoly<'a> {
         let deg_a = deg_a as usize + 1;
         let deg_b = deg_b as usize + 1;
         let coeffs = if deg_a >= deg_b {
-            self.coeffs.iter().take(deg_a)
-                .zip(rhs.coeffs.iter().take(deg_b)
-                    .chain(std::iter::repeat(&self.zero)))
-                .map(|(&a, &b)| a + b).collect()
+            let mut out = self.coeffs;
+            for (i, e) in out.iter_mut().take(deg_b).enumerate() {
+                *e = *e + rhs.coeffs[i];
+            }
+            out
         }  else {
-            rhs.coeffs.iter().take(deg_b)
-                .zip(self.coeffs.iter().take(deg_a)
-                    .chain(std::iter::repeat(&self.zero)))
-                .map(|(&a, &b)| a + b).collect()
+            let mut out = rhs.coeffs;
+            for (i, e) in out.iter_mut().take(deg_a).enumerate() {
+                *e = *e + self.coeffs[i];
+            }
+            out
         };
         GFPoly { zero: self.zero, coeffs }
     }
@@ -178,7 +180,8 @@ impl<'a> Div for GFPoly<'a> {
             return (zero1, zero2);
         }
         if deg_r < deg_d {
-            panic!("The degree of the dividend must be greater or equal to the degree of the divisor");
+            panic!("The degree of the dividend must be greater or equal
+                to the degree of the divisor");
         }
         let mut q = GFPoly {
             zero: self.zero,
