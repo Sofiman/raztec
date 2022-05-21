@@ -77,12 +77,13 @@ impl AztecReader {
         }
     }
 
-    fn check_ratio(&self, counts: &[usize; 9], total: usize) -> bool {
-        if total < 11 {
+    fn check_ratio(&self, counts: &[usize; 5], total: usize) -> bool {
+        if total < 7 {
             return false;
         }
-        let mod_size = ((total - 1) / 11) as i32 + 1;
+        let mod_size = ((total - 1) / 7) as i32 + 1;
         let max_v = mod_size as i32 / 2;
+        println!("{:?}", counts);
 
         let mut total = 0;
         for &count in counts {
@@ -90,32 +91,30 @@ impl AztecReader {
                 total += 1;
             }
         }
-        total == 9
+        total == 5
     }
 
-    fn center_from_end(&self, counts: &[usize; 9], col: usize) -> usize {
-        col - counts[5..].iter().sum::<usize>() - counts[4] / 2
+    fn center_from_end(&self, counts: &[usize; 5], col: usize) -> usize {
+        col - counts[3..].iter().sum::<usize>() - counts[2] / 2
     }
 
     fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize, total: usize) -> Option<usize> {
         let mut row = start_row + 1;
-        let mut counts = [0usize; 9];
+        let mut counts = [0usize; 5];
 
         // Going up to the border of the current square
         while row > 0 && self.get_px(row - 1, col) {
-            self.markers.push(Marker::blue((col, row - 1), (1, 1)));
-            counts[4] += 1;
+            counts[2] += 1;
             row -= 1;
         }
         if row == 0 {
             return None
         }
 
-        for i in (0..4).rev() {
+        for i in (0..2).rev() {
             let expected_col = i % 2 == 0; // when odd we count white pixels
             while row > 0 && self.get_px(row - 1, col) == expected_col
             && counts[i] <= mid {
-                self.markers.push(Marker::green((col, row - 1), (1, 1)));
                 counts[i] += 1;
                 row -= 1;
             }
@@ -127,19 +126,17 @@ impl AztecReader {
         let l = self.height;
         row = start_row + 2;
         while row <= l && self.get_px(row - 1, col) {
-            self.markers.push(Marker::blue((col, row - 1), (1, 1)));
-            counts[4] += 1;
+            counts[2] += 1;
             row += 1;
         }
         if row > l {
             return None
         }
 
-        for i in 5..9 {
+        for i in 3..5 {
             let expected_col = i % 2 == 0; // when odd we count white pixels
             while row <= l && self.get_px(row - 1, col) == expected_col
             && counts[i] <= mid {
-                self.markers.push(Marker::green((col, row - 1), (1, 1)));
                 counts[i] += 1;
                 row += 1;
             }
@@ -150,7 +147,7 @@ impl AztecReader {
 
         let total = total as i32;
         let new_total: usize = counts.iter().sum();
-        if 9 * (new_total as i32 - total).abs() < 2 * total &&
+        if 5 * (new_total as i32 - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
             Some(self.center_from_end(&counts, row - 1))
         } else {
@@ -158,30 +155,82 @@ impl AztecReader {
         }
     }
 
-    fn check_horizontal(&self, row: usize, col: usize, mid: usize, total: usize) -> Option<usize> {
-        todo!()
+    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize, total: usize) -> Option<usize> {
+        let mut col = start_col + 1;
+        let mut counts = [0usize; 5];
+
+        // Going up to the border of the current square
+        while col > 0 && self.get_px(row, col - 1) {
+            counts[2] += 1;
+            col -= 1;
+        }
+        if col == 0 {
+            return None
+        }
+
+        for i in (0..2).rev() {
+            let expected_col = i % 2 == 0; // when odd we count white pixels
+            while col > 0 && self.get_px(row, col - 1) == expected_col
+            && counts[i] <= mid {
+                counts[i] += 1;
+                col -= 1;
+            }
+            if col == 0 {
+                return None
+            }
+        }
+
+        let l = self.width;
+        col = start_col + 2;
+        while col <= l && self.get_px(row, col - 1) {
+            counts[2] += 1;
+            col += 1;
+        }
+        if col > l {
+            return None
+        }
+
+        for i in 3..5 {
+            let expected_col = i % 2 == 0; // when odd we count white pixels
+            while col <= l && self.get_px(row, col - 1) == expected_col
+            && counts[i] <= mid {
+                counts[i] += 1;
+                col += 1;
+            }
+            if col > l {
+                return None
+            }
+        }
+
+        let total = total as i32;
+        let new_total: usize = counts.iter().sum();
+        if 5 * (new_total as i32 - total).abs() < 2 * total &&
+            self.check_ratio(&counts, new_total) {
+            Some(self.center_from_end(&counts, col - 1))
+        } else {
+            None
+        }
     }
 
     fn check_diag(&self, row: usize, col: usize, mid: usize, total: usize) -> bool {
         todo!()
     }
 
-    fn handle_center(&mut self, counts: &[usize; 9], row: usize, col: usize,
+    fn handle_center(&mut self, counts: &[usize; 5], row: usize, col: usize,
         total: usize, centers: &mut Vec<AztecCenter>) -> Option<()> {
 
-        let mid_val = (counts.iter().sum::<usize>() as f32 / 9.0).ceil() as usize;
+        let mid_val = (counts.iter().sum::<usize>() as f32 / 5.0).ceil() as usize;
         println!("verifying center...");
         let center_col = self.center_from_end(counts, col);
-        self.markers.push(Marker::orange((center_col, row), (1, 1)));
         let center_row = self.check_vertical(row, center_col, mid_val, total)?;
         println!("Vertical: OK");
-        self.markers.push(Marker::red((center_col, center_row), (1, 1)));
-        Some(())
 
-        /*
         let center_col = self.check_horizontal(center_row,
             center_col, mid_val, total)?;
-
+        self.markers.push(Marker::red((center_col, center_row), (1, 1)));
+        println!("Horizontal: OK");
+        Some(())
+        /*
         if self.check_diag(center_row, center_col, counts[2], total) {
             let mod_size = total as f32 / 11.0;
             let center = AztecCenter { loc: (center_col, center_row), mod_size };
@@ -195,7 +244,7 @@ impl AztecReader {
 
     fn find_bullseye(&mut self) -> Result<AztecCenter, AztecReadError> {
         let mut centers = vec![];
-        let mut counts = [0; 9];
+        let mut counts = [0; 5];
         for row in 0..self.height {
             counts.fill(0);
             let mut current_state = 0;
@@ -208,17 +257,18 @@ impl AztecReader {
                     counts[current_state] += 1;
                 } else if current_state % 2 == 1 {
                     counts[current_state] += 1;
-                } else if current_state == 8 {
+                } else if current_state == 4 {
                     let total: usize = counts.iter().sum();
                     if self.check_ratio(&counts, total) {
+                        self.markers.push(Marker::red((col, row), (1, 1)));
                         self.handle_center(&counts, row, col, total, &mut centers);
                         counts.fill(0);
                         current_state = 0;
                     } else {
-                        current_state = 7;
+                        current_state = 3;
                         counts.rotate_left(2);
-                        counts[7] = 1;
-                        counts[8] = 0;
+                        counts[3] = 1;
+                        counts[4] = 0;
                     }
                 } else {
                     current_state += 1;
