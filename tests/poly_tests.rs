@@ -137,16 +137,3 @@ fn test_poly_mult_div_comp(){
     let c = Polynomial::new(&[1, 0, 6, 4, 11, 1]);
     assert_eq!(a * b / c, (Polynomial::new(&[9]), Polynomial::new(&[-9, 0, -54, -36, -99])));
 }
-
-#[test]
-fn test_poly_modulo(){
-    let a = Polynomial::new(&[-9, -18, -54, -36, -99]);
-    assert_eq!(a % 16, Polynomial::new(&[7, 14, 10, 12, 13]));
-}
-
-#[test]
-fn test_poly_add_mod_comp(){
-    let a = Polynomial::new(&[2, 3, 0, 10]);
-    let b = Polynomial::new(&[4, 15, 0, 16]);
-    assert_eq!((a + b) % 17, Polynomial::new(&[6, 1, 0, 9]));
-}

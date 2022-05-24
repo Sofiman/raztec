@@ -17,7 +17,8 @@ impl ReedSolomonEncoder {
     pub fn generate_check_codes(&self, data: &[usize], k: usize) -> Vec<usize> {
         let coeffs: Vec<GFNum> = data.iter()
             .map(|&x| self.gf.num(x)).rev().collect();
-        let poly = GFPoly::new(&self.gf, &coeffs) << k;
+        let mut poly = GFPoly::new(&self.gf, &coeffs);
+        poly <<= k;
 
         let mut generator = GFPoly::new(&self.gf, &[self.gf.num(1)]);
         for i in 1..=k {
@@ -26,9 +27,9 @@ impl ReedSolomonEncoder {
             generator = generator * next;
         }
 
-        let (_, rem) = poly / generator;
+        let rem = poly % &generator;
         let mut output: Vec<usize> = data.to_vec();
-        output.extend(rem.iter().take(k).rev().map(|&x| x.value()));
+        output.extend(rem.into_coeffs().take(k).rev().map(|x| x.value()));
         output
     }
 }

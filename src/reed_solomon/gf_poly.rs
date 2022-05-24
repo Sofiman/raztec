@@ -1,7 +1,8 @@
-use std::{ops::{Add, Sub, Mul, Div, Shl, Index}, fmt::Display, isize};
+use std::{ops::{Add, Sub, Mul, Div, Index, Rem, MulAssign, ShlAssign, AddAssign},
+fmt::Display, isize, vec::IntoIter};
 use super::gf::*;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GFPoly<'a> {
     // index corresponds to the power of x
     // example: coeffs[0] is equal to b in ax + b
@@ -13,6 +14,12 @@ pub struct GFPoly<'a> {
 impl<'a> GFPoly<'a> {
     pub fn new(gf: &'a GF, coeffs: &[GFNum<'a>]) -> Self {
         Self { zero: gf.num(0), coeffs: coeffs.to_vec() }
+    }
+
+    pub fn from_nums(gf: &'a GF, coeffs: &[usize]) -> Self {
+        let coeffs: Vec<GFNum> = coeffs.iter()
+            .map(|&x| gf.num(x)).collect();
+        Self { zero: gf.num(0), coeffs }
     }
 
     pub fn zero(gf: &'a GF) -> Self {
@@ -33,6 +40,10 @@ impl<'a> GFPoly<'a> {
 
     pub fn iter(&'a self) -> std::slice::Iter<'a, GFNum<'a>> {
         self.coeffs.iter()
+    }
+
+    pub fn into_coeffs(self) -> IntoIter<GFNum<'a>> {
+        self.coeffs.into_iter()
     }
 
     pub fn eval(&'a self, x: GFNum<'a>) -> GFNum<'a> {
@@ -81,13 +92,13 @@ impl<'a> Add for GFPoly<'a> {
     type Output = GFPoly<'a>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let deg_a = self.deg();
-        if deg_a < 0 {
-            return rhs;
-        }
         let deg_b = rhs.deg();
         if deg_b < 0 {
             return self;
+        }
+        let deg_a = self.deg();
+        if deg_a < 0 {
+            return rhs;
         }
 
         let deg_a = deg_a as usize + 1;
@@ -106,6 +117,29 @@ impl<'a> Add for GFPoly<'a> {
             out
         };
         GFPoly { zero: self.zero, coeffs }
+    }
+}
+
+impl<'a> AddAssign<&GFPoly<'a>> for GFPoly<'a> {
+    fn add_assign(&mut self, rhs: &Self) {
+        let deg_b = rhs.deg();
+        if deg_b < 0 {
+            return;
+        }
+        let deg_a = self.deg();
+        if deg_a < 0 {
+            self.coeffs.clone_from(&rhs.coeffs);
+            return;
+        }
+
+        let deg_a = deg_a as usize + 1;
+        let deg_b = deg_b as usize + 1;
+        if deg_a < deg_b {
+            self.coeffs.extend_from_slice(&rhs.coeffs[deg_a..deg_b]);
+        }
+        for (i, e) in self.coeffs.iter_mut().take(deg_b).enumerate() {
+            *e = *e + rhs.coeffs[i];
+        }
     }
 }
 
@@ -141,34 +175,38 @@ impl<'a> Mul for GFPoly<'a> {
 }
 
 impl<'a> Mul<GFNum<'a>> for GFPoly<'a> {
-    type Output = GFPoly<'a>;
+    type Output = Self;
 
-    fn mul(self, rhs: GFNum<'a>) -> Self::Output {
-        let deg_a = self.deg();
-        if deg_a < 0 || rhs == self.zero {
-            return GFPoly { zero: self.zero, coeffs: Vec::new() }
+    fn mul(mut self, rhs: GFNum<'a>) -> Self {
+        self *= rhs;
+        self
+    }
+}
+
+impl<'a> MulAssign<GFNum<'a>> for GFPoly<'a> {
+
+    fn mul_assign(&mut self, rhs: GFNum<'a>) {
+        if rhs == self.zero || self.deg() < 0 {
+            self.coeffs.clear();
+            return;
         }
-        let coeffs = self.coeffs.into_iter().take(deg_a as usize + 1)
-            .map(|coef| coef * rhs).collect();
-        GFPoly { zero: self.zero, coeffs }
+        for coef in self.coeffs.iter_mut() {
+            *coef = *coef * rhs;
+        }
     }
 }
 
-impl<'a> Shl<usize> for GFPoly<'a> {
-    type Output = GFPoly<'a>;
-
-    fn shl(self, rhs: usize) -> Self::Output {
+impl<'a> ShlAssign<usize> for GFPoly<'a> {
+    fn shl_assign(&mut self, rhs: usize) {
         // mutiply by x^rhs
-        let coeffs = std::iter::repeat(self.zero).take(rhs)
-            .chain(self.coeffs.into_iter()).collect();
-        GFPoly { zero: self.zero, coeffs }
+        self.coeffs.splice(0..0, std::iter::repeat(self.zero).take(rhs));
     }
 }
 
-impl<'a> Div for GFPoly<'a> {
+impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
     type Output = (GFPoly<'a>, GFPoly<'a>);
 
-    fn div(self, rhs: Self) -> Self::Output {
+    fn div(self, rhs: &Self) -> Self::Output {
         let deg_d = rhs.deg();
         if deg_d < 0 {
             panic!("GFPoly division by zero");
@@ -188,17 +226,52 @@ impl<'a> Div for GFPoly<'a> {
             coeffs: vec![self.zero; deg_r as usize + 1]
         };
         let mut r = self;
+        let mut divisor = rhs.clone();
 
         while deg_r >= deg_d {
             let lead = (deg_r - deg_d) as usize;
             let coef = r.coeffs[deg_r as usize] / rhs.coeffs[deg_d as usize];
-            let divisor = (rhs.clone() * coef) << lead;
             q.coeffs[lead] = coef;
-            r = r - divisor;
+            divisor *= coef;
+            divisor <<= lead;
+            r += &divisor; // here, it is actually a substraction
             deg_r = r.deg();
+            divisor.clone_from(rhs); // set divisor back to rhs
         }
 
         (q, r)
+    }
+}
+
+impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
+    type Output = GFPoly<'a>;
+
+    fn rem(self, rhs: &Self) -> Self::Output {
+        let deg_d = rhs.deg();
+        if deg_d < 0 {
+            panic!("GFPoly division by zero");
+        }
+        let mut deg_r = self.deg();
+        if deg_r < 0 {
+            return GFPoly { zero: self.zero, coeffs: Vec::new() };
+        }
+        if deg_r < deg_d {
+            panic!("The degree of the dividend must be greater or equal
+                to the degree of the divisor");
+        }
+        let mut r = self;
+        let mut divisor = rhs.clone();
+
+        while deg_r >= deg_d {
+            let lead = (deg_r - deg_d) as usize;
+            divisor *= r.coeffs[deg_r as usize] / rhs.coeffs[deg_d as usize];
+            divisor <<= lead;
+            r += &divisor; // here, it is actually a substraction
+            deg_r = r.deg();
+            divisor.clone_from(rhs); // set divisor back to rhs
+        }
+
+        r
     }
 }
 

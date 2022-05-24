@@ -1,4 +1,4 @@
-use std::{ops::{Add, Sub, Mul, Div, Shl, Index, Rem}, fmt::Display, isize};
+use std::{ops::{Add, Sub, Mul, Div, Shl, Index, Neg}, fmt::Display, isize};
 
 #[derive(Debug)]
 pub struct Polynomial {
@@ -161,6 +161,14 @@ impl Mul<isize> for Polynomial {
     }
 }
 
+impl Neg for Polynomial {
+    type Output = Polynomial;
+
+    fn neg(self) -> Self::Output {
+        self * -1
+    }
+}
+
 impl Shl<usize> for Polynomial {
     type Output = Polynomial;
 
@@ -201,17 +209,6 @@ impl Div for Polynomial {
         }
 
         (q, r)
-    }
-}
-
-impl Rem<usize> for Polynomial {
-    type Output = Polynomial;
-
-    fn rem(self, rhs: usize) -> Self::Output {
-        let coeffs = self.coeffs.to_vec()
-            .iter().map(|&x| x.rem_euclid(rhs as isize))
-            .collect();
-        Polynomial { coeffs }
     }
 }
 
