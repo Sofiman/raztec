@@ -3,6 +3,7 @@
 //! A library for reading and writing Aztec 2D Barcodes using no external lib
 
 pub mod writer;
+#[allow(warnings)]
 pub mod reader;
 pub mod reed_solomon;
 use std::ops::{Index, IndexMut};
