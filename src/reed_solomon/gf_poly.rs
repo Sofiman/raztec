@@ -1,8 +1,8 @@
 use std::{ops::{Add, Sub, Mul, Div, Index, Rem, MulAssign, ShlAssign, AddAssign},
-fmt::Display, isize, vec::IntoIter};
+fmt::{Display, Debug}, isize, vec::IntoIter};
 use super::gf::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GFPoly<'a> {
     // index corresponds to the power of x
     // example: coeffs[0] is equal to b in ax + b
@@ -266,6 +266,7 @@ impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
             let lead = (deg_r - deg_d) as usize;
             divisor *= r.coeffs[deg_r as usize] / rhs.coeffs[deg_d as usize];
             divisor <<= lead;
+            // this shift is unecessary in some cases, consider optimizing it
             r += &divisor; // here, it is actually a substraction
             deg_r = r.deg();
             divisor.clone_from(rhs); // set divisor back to rhs
@@ -295,6 +296,30 @@ impl Display for GFPoly<'_> {
             write!(f, " + ")?;
         }
         write!(f, "{}", self.coeffs[0].value())?;
+        Ok(())
+    }
+}
+
+impl Debug for GFPoly<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.deg() < 0 {
+            return write!(f, "0 over {}", self.zero.group());
+        }
+        for (power, &gfnum) in self.coeffs.iter().skip(1).enumerate().rev() {
+            let coef = gfnum.value();
+            if coef == 0 {
+                continue;
+            }
+            if coef != 1 {
+                write!(f, "{}", coef)?;
+            }
+            write!(f, "X")?;
+            if power > 0 {
+                write!(f, "^{}", power + 1)?;
+            }
+            write!(f, " + ")?;
+        }
+        write!(f, "{} over {}", self.coeffs[0].value(), self.zero.group())?;
         Ok(())
     }
 }

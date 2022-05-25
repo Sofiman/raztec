@@ -1,7 +1,6 @@
-use std::{ops::{Add, Sub, Mul, Div}, fmt::Display};
+use std::{ops::{Add, Sub, Mul, Div}, fmt::{Display, Debug}};
 use super::{poly::Polynomial, gf_poly::GFPoly};
 
-#[derive(Debug)]
 pub struct GF {
     order: u8,
     size: usize,
@@ -115,8 +114,15 @@ impl PartialEq for GF {
 
 impl Display for GF {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "GF(size: {}, primitive: {})", 
-            self.size, self.get_poly(self.primitive))
+        write!(f, "GF(2^{}, primitive: {})",
+            self.order, self.get_poly(self.primitive))
+    }
+}
+
+impl Debug for GF {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GF(2^{}, primitive: {})",
+            self.order, self.get_poly(self.primitive))
     }
 }
 
@@ -158,9 +164,8 @@ impl<'a> Add for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        if self.gf.order != rhs.gf.order {
-            panic!("Attempt to use finite field arithmetic on values from different fields");
-        }
+        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+            arithmetic on values from different fields");
         self.gf.add(self, rhs)
     }
 }
@@ -169,9 +174,8 @@ impl<'a> Sub for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        if self.gf.order != rhs.gf.order {
-            panic!("Attempt to use finite field arithmetic on values from different fields");
-        }
+        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+            arithmetic on values from different fields");
         self.gf.sub(self, rhs)
     }
 }
@@ -180,9 +184,8 @@ impl<'a> Mul for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        if self.gf.order != rhs.gf.order {
-            panic!("Attempt to use finite field arithmetic on values from different fields");
-        }
+        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+            arithmetic on values from different fields");
         self.gf.mul(self, rhs)
     }
 }
@@ -191,9 +194,8 @@ impl<'a> Div for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        if self.gf.order != rhs.gf.order {
-            panic!("Attempt to use finite field arithmetic on values from different fields");
-        }
+        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+            arithmetic on values from different fields");
         self.gf.div(self, rhs)
     }
 }
