@@ -164,7 +164,7 @@ impl<'a> Add for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+        assert_eq!(self.gf.order, rhs.gf.order, "Attempt to use finite field
             arithmetic on values from different fields");
         self.gf.add(self, rhs)
     }
@@ -174,7 +174,7 @@ impl<'a> Sub for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+        assert_eq!(self.gf.order, rhs.gf.order, "Attempt to use finite field
             arithmetic on values from different fields");
         self.gf.sub(self, rhs)
     }
@@ -184,7 +184,7 @@ impl<'a> Mul for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+        assert_eq!(self.gf.order, rhs.gf.order, "Attempt to use finite field
             arithmetic on values from different fields");
         self.gf.mul(self, rhs)
     }
@@ -194,7 +194,7 @@ impl<'a> Div for GFNum<'a> {
     type Output = GFNum<'a>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        assert_ne!(self.gf.order, rhs.gf.order, "Attempt to use finite field
+        assert_eq!(self.gf.order, rhs.gf.order, "Attempt to use finite field
             arithmetic on values from different fields");
         self.gf.div(self, rhs)
     }
