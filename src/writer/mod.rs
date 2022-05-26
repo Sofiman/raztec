@@ -479,35 +479,34 @@ impl AztecCodeBuilder {
         let mut chars = text.chars();
         let mut prev_word = self.process_char(chars.next().unwrap(), 0);
         for (i, c) in chars.enumerate() {
-            if c == '\n' || c == ' ' {
-                match (c, prev_word) {
-                    ('\n', (Word::Punc(1), Mode::Punctuation)) => {
-                        prev_word = (Word::Punc(2), Mode::Punctuation);
-                        continue;
-                    },
-                    (' ', (Word::Punc(19), Mode::Punctuation)) => {
-                        prev_word = (Word::Punc(3), Mode::Punctuation);
-                        continue;
-                    },
-                    (' ', (Word::Punc(17), Mode::Punctuation)) => {
-                        prev_word = (Word::Punc(4), Mode::Punctuation);
-                        continue;
-                    },
-                    (' ', (Word::Punc(21), Mode::Punctuation)) => {
-                        prev_word = (Word::Punc(5), Mode::Punctuation);
-                        continue;
-                    },
-                    _ => ()
+            prev_word = match (c, prev_word) {
+                // Check for 2-bytes words combinations
+                ('\n', (Word::Punc(1), Mode::Punctuation))
+                    => (Word::Punc(2), Mode::Punctuation),
+
+                (' ',  (Word::Punc(19), Mode::Punctuation))
+                    => (Word::Punc(3),  Mode::Punctuation),
+
+                (' ',  (Word::Punc(17), Mode::Punctuation))
+                    => (Word::Punc(4),  Mode::Punctuation),
+
+                (' ',  (Word::Punc(21), Mode::Punctuation))
+                    => (Word::Punc(5),  Mode::Punctuation),
+
+                _ => {
+                    let next = self.process_char(c, i + 1);
+                    self.push_in(prev_word, Some(next));
+                    next
                 }
             }
-            let next = self.process_char(c, i + 1);
-            self.push_in(prev_word, Some(next));
-            prev_word = next;
         }
         self.push_in(prev_word, None);
         self
     }
 
+    /// Returns the next state according to the current mode and the modes in
+    /// which the character can be encoded (assuming this function is called
+    /// when processing a character).
     fn poly_word(&self, accepted_mode: Mode, original: Word,
         normal_mode: Mode, other: Word) -> (Word, Mode) {
         if self.current_mode != accepted_mode {
@@ -537,19 +536,19 @@ impl AztecCodeBuilder {
                                  Mode::Punctuation, Word::Punc(17)),
             46 => self.poly_word(Mode::Digit, Word::Digit(13), // .
                                  Mode::Punctuation, Word::Punc(19)),
-            33..=47 => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
-            48..=57 => (Word::digit(c), Mode::Digit),
-            58..=63 => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
-            64 => (Word::Mixed(20), Mode::Mixed), // @
-            65..=90 => (Word::upper_letter(c), Mode::Upper),
-            91 => (Word::Punc(27), Mode::Punctuation), // [
-            92 => (Word::Mixed(21), Mode::Mixed), // \
-            93 => (Word::Punc(28), Mode::Punctuation), // ]
-            94..=96 => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
-            97..=122 => (Word::lower_letter(c), Mode::Lower),
-            123 => (Word::Punc(29), Mode::Punctuation), // {
-            124 => (Word::Mixed(25), Mode::Mixed), // |
-            125 => (Word::Punc(30), Mode::Punctuation), // } 
+            33..=47   => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
+            48..=57   => (Word::digit(c), Mode::Digit),
+            58..=63   => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
+            64        => (Word::Mixed(20), Mode::Mixed), // @
+            65..=90   => (Word::upper_letter(c), Mode::Upper),
+            91        => (Word::Punc(27), Mode::Punctuation), // [
+            92        => (Word::Mixed(21), Mode::Mixed), // \
+            93        => (Word::Punc(28), Mode::Punctuation), // ]
+            94..=96   => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
+            97..=122  => (Word::lower_letter(c), Mode::Lower),
+            123       => (Word::Punc(29), Mode::Punctuation), // {
+            124       => (Word::Mixed(25), Mode::Mixed), // |
+            125       => (Word::Punc(30), Mode::Punctuation), // } 
             126..=127 => (Word::Mixed(c as u8 - 100), Mode::Mixed), // ~ -> DEL
             x => panic!("Character not supported `{}` (code: {}) at index {}",
                 c.escape_default(), x, idx)
