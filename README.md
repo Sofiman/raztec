@@ -27,8 +27,18 @@ There is currently no builtin Aztec code reader.
 
 ![Example Aztec Code](https://i.imgur.com/HmgLg70.png)
 
+## Documentation
+
+The library's code is fully documented, to see the documentation use:
+```cargo doc --open```
+
+## Issues
+
+If you enconter any issues or bugs while generating or scanning Aztec Codes,
+please open an issue so I can look into it.
+
 ## TODO
 
 - Implement an Aztec code reader
-- Add more documentation
+- Add support for Aztec runes
 - Improve speed of big Aztec Code generation
