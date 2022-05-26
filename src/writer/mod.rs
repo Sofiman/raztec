@@ -757,6 +757,34 @@ impl AztecCodeBuilder {
         writer.fill(&bitstr);
         Ok(writer.into_aztec())
     }
+
+    /// Generate an Aztec Code Rune containing a single byte of information
+    pub fn build_rune(data: u8) -> AztecCode {
+        let mut code = AztecCode::new(true, 11);
+
+        let encoder = ReedSolomonEncoder::new(4, 0b10011);
+        let mut data = vec![
+            ((data >> 4) & 0b1111) as usize,
+            (data & 0b1111) as usize
+        ];
+        data.extend(encoder.generate_check_codes(&data, 5));
+
+        let mut service_message = vec![false; 28];
+        let mut i = 0;
+        for b in data.iter() {
+            for j in 0..4 {
+                // in order to distinguish them from normal overhead messages,
+                // each bit is inverted at the graphical level (word xor 1010)
+                let b = b ^ 0b1010;
+                service_message[i + 3 - j] = (b >> j) & 1 == 1;
+            }
+            i += 4;
+        }
+
+        let writer = AztecWriter::new(0, 0, 0);
+        writer.fill_compact_service_message(&service_message, &mut code);
+        code
+    }
 }
 
 impl Default for AztecCodeBuilder {
