@@ -35,12 +35,20 @@ impl ReedSolomonEncoder {
         let mut poly = GFPoly::new(&self.gf, &coeffs);
         poly <<= k;
 
-        let mut generator = GFPoly::new(&self.gf, &[self.gf.num(1)]);
+        // Calculate the generator polynomial by calculating
+        // the polynomial (x-2^1)(x-2^2)...(x-2^k)
+        let mut coeffs = vec![self.gf.num(0); k + 1];
+        coeffs[0] = self.gf.num(1);
+
         for i in 1..=k {
-            let power = self.gf.exp2(self.gf.num(i));
-            let next = GFPoly::new(&self.gf, &[power, self.gf.num(1)]);
-            generator = generator * next;
+            coeffs[i] = coeffs[i - 1];
+            let p = self.gf.exp2(self.gf.num(i));
+            for j in (1..i).rev() {
+                coeffs[j] = coeffs[j - 1] + (coeffs[j] * p);
+            }
+            coeffs[0] = coeffs[0] * p;
         }
+        let generator = GFPoly::new(&self.gf, &coeffs);
 
         let rem = poly % &generator;
         rem.into_coeffs().take(k).rev().map(|x| x.value())
