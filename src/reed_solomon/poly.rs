@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{ops::{Add, Sub, Mul, Div, Shl, Index, Neg}, fmt::Display, isize};
 
 #[derive(Debug)]

@@ -70,7 +70,7 @@ impl Domino {
     }
 
     fn check_splitting(&mut self, middle: usize) -> usize {
-        let (x,y) = self.tail();
+        let (x, y) = self.tail();
         if x % 16 == middle || y % 16 == middle {
             self.offset += 1;
         }
@@ -116,7 +116,7 @@ impl AztecWriter {
                     dominos[base + limit*2] = Domino::left((end - i, end));
                     dominos[base + limit*3] = Domino::down((start, end - i));
                 }
-                idx += limit*4;
+                idx += limit * 4;
             }
         } else {
             let mid = (size / 2) % 16;
@@ -207,17 +207,21 @@ impl AztecWriter {
 
         let (words, data) =
             if self.compact {
-                (28, encoder.generate_check_codes(&[
+                let mut data = vec![
                     (layers << 2) | ((words >> 4) & 3),
                     words & 15
-                ], 5))
+                ];
+                data.extend(encoder.generate_check_codes(&data, 5));
+                (28, data)
             } else {
-                (40, encoder.generate_check_codes(&[
+                let mut data = vec![
                     layers >> 1,
                     ((words & 0b11100000000) >> 8) | (layers & 1) << 3,
                     (words & 0b00011110000) >> 4,
                     words & 0b00000001111,
-                ], 6))
+                ];
+                data.extend(encoder.generate_check_codes(&data, 6));
+                (40, data)
             };
 
         let mut service_message = vec![false; words];
@@ -566,7 +570,7 @@ impl AztecCodeBuilder {
             let mut code = LATCH_TABLE[switch];
 
             self.current_mode = expected_mode;
-            let (_, next_mode) = next.unwrap_or((word, expected_mode));
+            let (_, next_mode) = next.unwrap_or((word, cur_mode));
             // see if we can do a shift instead of a latch
             if next_mode == cur_mode {
                 let shift = SHIFT_TABLE[switch];
@@ -629,7 +633,8 @@ impl AztecCodeBuilder {
             return;
         }
         let mut i = 0;
-        let (l, limit) = (bitstr.len() - codeword_size, codeword_size - 1);
+        let l = bitstr.len() - codeword_size;
+        let limit = codeword_size - 1;
         while i < l {
             let first = bitstr[i];
             let mut j = 1;
@@ -736,13 +741,13 @@ impl AztecCodeBuilder {
 
         let check_words = rs.generate_check_codes(&words, to_fill);
         if codeword_size > 8 {
-            for check_word in check_words.iter().skip(words.len()) {
+            for check_word in check_words {
                 self.append_bits(&mut bitstr, (check_word >> 8) as u8,
                     (codeword_size - 8) as u8);
                 self.append_bits(&mut bitstr, (check_word & 0xFF) as u8, 8);
             }
         } else {
-            for &check_word in check_words.iter().skip(words.len()) {
+            for check_word in check_words {
                 self.append_bits(&mut bitstr, check_word as u8,
                     codeword_size as u8);
             }
@@ -766,6 +771,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_add_padding() {
+        let inp = "00100111";
+        let exp = "001001111110";
+        let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        AztecCodeBuilder::new().add_padding(&mut bitstr, 6);
+        assert_eq!(expected, bitstr);
+    }
+
+    #[test]
+    fn test_add_padding2() {
+        let inp = "001001101";
+        let exp = "001001101111";
+        let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        AztecCodeBuilder::new().add_padding(&mut bitstr, 6);
+        assert_eq!(expected, bitstr);
+    }
+
+    #[test]
     fn test_bit_stuffing() {
         let inp = "00100111001000000101001101111000010100111100101000000110";
         let exp = "0010011100100000011010011011110000101001111001010000010110";
@@ -773,5 +798,50 @@ mod tests {
         let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
         AztecCodeBuilder::new().bit_stuffing(&mut bitstr, 6);
         assert_eq!(expected, bitstr);
+    }
+
+    #[test]
+    fn test_to_bitstr() {
+        use Word::*;
+        let inp = vec![Char(8), Char(28), Char(16), Char(0), Punc(6)];
+        let exp = "0100011100100000000000110";
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        let mut builder = AztecCodeBuilder::new();
+        builder.words = inp;
+        assert_eq!(expected, builder.to_bit_string());
+    }
+
+    #[test]
+    fn test_to_bitstr2() {
+        use Word::*;
+        let inp = vec![Char(14), Char(30), Digit(3), Digit(6)];
+        let exp = "011101111000110110";
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        let mut builder = AztecCodeBuilder::new();
+        builder.words = inp;
+        assert_eq!(expected, builder.to_bit_string());
+    }
+
+    #[test]
+    fn test_append_bytes() {
+        let inp = vec![0x47, 0x6f, 0x74, 0x6f, 0x75, 0x62, 0x75, 0x6e];
+        let exp =
+"11111010000100011101101111011101000110111101110101011000100111010101101110";
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        let mut builder = AztecCodeBuilder::new();
+        builder.append_bytes(&inp);
+        assert_eq!(expected, builder.to_bit_string());
+    }
+
+    #[test]
+    fn test_append_eci() {
+        let exp = "11111000011011011000000000000011001111110000110110110";
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        let mut builder = AztecCodeBuilder::new();
+        builder
+            .append_bytes(&[182])
+            .append_eci(7)
+            .append_bytes(&[182]);
+        assert_eq!(expected, builder.to_bit_string());
     }
 }

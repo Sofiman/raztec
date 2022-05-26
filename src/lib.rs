@@ -1,11 +1,14 @@
 //! # raztec
 //!
-//! A library for reading and writing Aztec 2D Barcodes using no external lib
+//! A library for generating and scanning Aztec 2D Barcodes using no third
+//! party dependency.
 
+#![warn(missing_docs)]
 pub mod writer;
-#[allow(warnings)]
+#[allow(warnings)] // TODO: Remove me when reader is operational
 pub mod reader;
 pub mod reed_solomon;
+
 use std::ops::{Index, IndexMut};
 use std::fmt::Display;
 
@@ -44,6 +47,8 @@ impl AztecCode {
         code
     }
 
+    /// Generates the bullseye pattern in the middle of the figure as well as
+    /// the orientation patterns.
     fn build_finder_pattern(&mut self) {
         let size = self.size;
         let middle = size / 2;
@@ -110,7 +115,8 @@ impl AztecCode {
         self.compact
     }
 
-    /// Convert the AztecCode to an image
+    /// Convert the AztecCode to an image using the specified scaling factor
+    /// and user's defined "colors".
     ///
     /// # Arguments
     ///
