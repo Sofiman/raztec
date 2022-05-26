@@ -228,10 +228,11 @@ impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
         };
         let mut r = self;
         let mut divisor = rhs.clone();
+        let inv_lead = rhs.coeffs[deg_d as usize].inv();
 
         while deg_r >= deg_d {
             let lead = (deg_r - deg_d) as usize;
-            let coef = r.coeffs[deg_r as usize] / rhs.coeffs[deg_d as usize];
+            let coef = r.coeffs[deg_r as usize] * inv_lead;
             q.coeffs[lead] = coef;
             divisor *= coef;
             divisor <<= lead;
@@ -262,10 +263,11 @@ impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
         }
         let mut r = self;
         let mut divisor = rhs.clone();
+        let inv_lead = rhs.coeffs[deg_d as usize].inv();
 
         while deg_r >= deg_d {
             let lead = (deg_r - deg_d) as usize;
-            divisor *= r.coeffs[deg_r as usize] / rhs.coeffs[deg_d as usize];
+            divisor *= r.coeffs[deg_r as usize] * inv_lead;
             divisor <<= lead;
             // this shift is unecessary in some cases, consider optimizing it
             r += &divisor; // here, it is actually a substraction
