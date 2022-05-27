@@ -1,9 +1,20 @@
 //! Aztec Writer module
 //!
-//! This module contains all the necessary tools to fully generate Aztec Codes.
+//! Raztec supports generating any type of Aztec codes from compact (1-4
+//! layers) to full-size (5-32 layers) and runes (1 byte). This module contains
+//! all the necessary tools to fully generate Aztec Codes. Aztec Codes encoding
+//! and generation and implemented according to the official Aztec Code Barcode
+//! Symbology Specification (ISO/IEC 24778).
+//!
+//! Aztec Codes can contain different types of information as Text, Binary data
+//! or more complex text using Enhanced Channel Interpretation (ECI). Pleas
+//! keep in mind that Aztec Codes containing ECI must be read by compatible
+//! scanners (at the risk of data corruption).
+//!
 //! # Examples
 //!
-//! Here is an example of generating an AztecCode containing strings and bytes:
+//! Here is an example of generating an Aztec Code containing strings and
+//! bytes:
 //! ```rust
 //!use raztec::writer::AztecCodeBuilder;
 //!let code = AztecCodeBuilder::new().error_correction(50)
@@ -13,8 +24,8 @@
 //!
 //! Here is an example of generating an Aztec rune with the value 38:
 //! ```rust
-//!use raztec::writer::AztecCodeBuilder;
-//!let code = AztecCodeBuilder::build_rune(38);
+//!use raztec::writer::build_rune;
+//!let code = build_rune(38);
 //! ```
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
@@ -240,17 +251,18 @@ impl AztecWriter {
         }
 
         if self.compact {
-            self.fill_compact_service_message(&service_message, &mut code);
+            Self::fill_compact_service_message(self.size / 2,
+                &service_message, &mut code);
         } else {
-            self.fill_full_service_message(&service_message, &mut code);
+            Self::fill_full_service_message(self.size / 2,
+                &service_message, &mut code);
         }
 
         code
     }
 
-    fn fill_compact_service_message(&self, service_message: &[bool],
+    fn fill_compact_service_message(middle: usize, service_message: &[bool],
         code: &mut AztecCode) {
-        let middle = self.size / 2;
         let start_idx = middle - 5;
         for i in 0..7 {
             code[(start_idx,  start_idx + 2 + i)] = service_message[i     ];
@@ -260,9 +272,8 @@ impl AztecWriter {
         }
     }
 
-    fn fill_full_service_message(&self, service_message: &[bool],
+    fn fill_full_service_message(middle: usize, service_message: &[bool],
         code: &mut AztecCode) {
-        let middle = self.size / 2;
         let start_idx = middle - 7;
         let end_idx = middle + 7;
         for i in 0..5 {
@@ -763,40 +774,40 @@ impl AztecCodeBuilder {
         writer.fill(&bitstr);
         Ok(writer.into_aztec())
     }
-
-    /// Generate an Aztec Code Rune containing a single byte of information
-    pub fn build_rune(data: u8) -> AztecCode {
-        let mut code = AztecCode::new(true, 11);
-
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let mut data = vec![
-            ((data >> 4) & 0b1111) as usize,
-            (data & 0b1111) as usize
-        ];
-        data.extend(encoder.generate_check_codes(&data, 5));
-
-        let mut service_message = vec![false; 28];
-        let mut i = 0;
-        for b in data.iter() {
-            // in order to distinguish them from normal overhead messages,
-            // each bit is inverted at the graphical level (word xor 1010)
-            let b = b ^ 0b1010;
-            for j in 0..4 {
-                service_message[i + 3 - j] = (b >> j) & 1 == 1;
-            }
-            i += 4;
-        }
-
-        let writer = AztecWriter::new(0, 0, 0);
-        writer.fill_compact_service_message(&service_message, &mut code);
-        code
-    }
 }
 
 impl Default for AztecCodeBuilder {
     fn default() -> Self {
         AztecCodeBuilder::new()
     }
+}
+
+/// Generate an Aztec Code Rune containing a single byte of information
+pub fn build_rune(data: u8) -> AztecCode {
+    let mut code = AztecCode::new(true, 11);
+
+    let encoder = ReedSolomonEncoder::new(4, 0b10011);
+    let mut data = vec![
+        ((data >> 4) & 0b1111) as usize,
+        (data & 0b1111) as usize
+    ];
+    data.extend(encoder.generate_check_codes(&data, 5));
+
+    let mut service_message = vec![false; 28];
+    let mut i = 0;
+    for b in data.iter() {
+        // in order to distinguish them from normal overhead messages,
+        // each bit is inverted at the graphical level (word xor 1010)
+        let b = b ^ 0b1010;
+        for j in 0..4 {
+            service_message[i + 3 - j] = (b >> j) & 1 == 1;
+        }
+        i += 4;
+    }
+
+    AztecWriter::fill_compact_service_message(11 / 2,
+        &service_message, &mut code);
+    code
 }
 
 #[cfg(test)]
