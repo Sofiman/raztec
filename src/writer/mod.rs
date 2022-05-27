@@ -5,15 +5,16 @@
 //!
 //! Here is an example of generating an AztecCode containing strings and bytes:
 //! ```rust
-//!   use raztec::writer::AztecCodeBuilder;
-//!   let code = AztecCodeBuilder::new().error_correction(50)
-//!       .append("Hello").append(", ").append_bytes("World!".as_bytes())
-//!       .build().unwrap();
+//!use raztec::writer::AztecCodeBuilder;
+//!let code = AztecCodeBuilder::new().error_correction(50)
+//!    .append("Hello").append(", ").append_bytes("World!".as_bytes())
+//!    .build().unwrap();
 //! ```
 //!
 //! Here is an example of generating an Aztec rune with the value 38:
 //! ```rust
-//!   let code = AztecCodeBuilder::build_rune(38);
+//!use raztec::writer::AztecCodeBuilder;
+//!let code = AztecCodeBuilder::build_rune(38);
 //! ```
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
