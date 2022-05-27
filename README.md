@@ -21,7 +21,15 @@ traits. You can get the current side size with `code.size()`.
 You can convert the AztecCode struct into a pixel array using `to_image`,
 `to_rgb8` and `to_mono8`.
 
-There is currently no builtin Aztec code reader.
+This library also supports the generation and scanning of Aztec Runes.
+An Aztec Rune is a compact Aztec Code containing only one byte of information.
+Here is an example of generating a rune with the byte value 38:
+```Rust
+use raztec::writer::AztecCodeBuilder;
+let rune = AztecCodeBuilder::build_rune(38);
+```
+
+There is currently no builtin Aztec code reader (Coming soon).
 
 ### Generated using raztec
 
@@ -40,5 +48,4 @@ please open an issue so I can look into it.
 ## TODO
 
 - Implement an Aztec code reader
-- Add support for Aztec runes
 - Improve speed of big Aztec Code generation

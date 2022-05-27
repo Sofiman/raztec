@@ -10,6 +10,11 @@
 //!       .append("Hello").append(", ").append_bytes("World!".as_bytes())
 //!       .build().unwrap();
 //! ```
+//!
+//! Here is an example of generating an Aztec rune with the value 38:
+//! ```rust
+//!   let code = AztecCodeBuilder::build_rune(38);
+//! ```
 use super::{*, reed_solomon::ReedSolomonEncoder};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -772,10 +777,10 @@ impl AztecCodeBuilder {
         let mut service_message = vec![false; 28];
         let mut i = 0;
         for b in data.iter() {
+            // in order to distinguish them from normal overhead messages,
+            // each bit is inverted at the graphical level (word xor 1010)
+            let b = b ^ 0b1010;
             for j in 0..4 {
-                // in order to distinguish them from normal overhead messages,
-                // each bit is inverted at the graphical level (word xor 1010)
-                let b = b ^ 0b1010;
                 service_message[i + 3 - j] = (b >> j) & 1 == 1;
             }
             i += 4;
