@@ -56,11 +56,18 @@ struct AztecCenter {
 }
 
 impl AztecCenter {
-    fn dst_sqd(&self, other: AztecCenter) -> usize {
+    fn dst_sqd(&self, other: &AztecCenter) -> usize {
         let (ax, ay) = self.loc;
         let (bx, by) = other.loc;
-        let (dx, dy) = (bx - ax, by - ay);
-        dx * dx + dy * dy
+        let (dx, dy) = (bx as isize - ax as isize, by as isize - ay as isize);
+        (dx * dx) as usize + (dy * dy) as usize
+    }
+
+    fn avg_with(&mut self, other: &AztecCenter) {
+        let (ax, ay) = self.loc;
+        let (bx, by) = other.loc;
+        self.loc = ((ax + bx) / 2, (ay + by) / 2);
+        self.mod_size = (self.mod_size + other.mod_size) / 2.0;
     }
 }
 
@@ -294,7 +301,12 @@ impl AztecReader {
         if self.check_diag(center_row, center_col, counts[2], total) {
             let mod_size = total as f32 / 5.0;
             let ct = AztecCenter { loc: (center_col, center_row), mod_size };
-            // TODO: Check if there is any close enough centers
+            for other in centers.iter_mut() {
+                if ct.dst_sqd(other) < 100 { // less than 10 pixels apart
+                    other.avg_with(&ct);
+                    return Some(());
+                }
+            }
             centers.push(ct);
             Some(())
         } else {
