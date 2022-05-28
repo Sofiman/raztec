@@ -1,19 +1,25 @@
 //! Aztec Reader module
 
 use std::fmt::Display;
+use super::{reed_solomon, AztecCode};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
-    NotFound,
+    BadSymbolOrientation(Marker, String),
+    InvalidSize(Marker, String)
 }
 
 impl AztecReadError {
     /// Returns the error message corresponding to the current error
-    pub fn message(&self) -> &str {
+    pub fn message(&self) -> String {
         use AztecReadError::*;
         match self {
-            NotFound => "No Aztec Code was found"
+            BadSymbolOrientation(mk, msg) =>
+                format!("Orientation detection for symbol at {} failed: {}",
+                    mk, msg),
+            InvalidSize(mk, msg) =>
+                format!("Symbol at {} has an invalid size: {}", mk, msg)
         }
     }
 }
@@ -24,6 +30,7 @@ impl Display for AztecReadError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Marker {
     pub color: u32,
     /// loc: (col, row)
@@ -50,12 +57,26 @@ impl Marker {
     }
 }
 
-struct AztecCenter {
+impl Display for Marker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (x, y) = self.loc;
+        let (w, h) = self.size;
+        write!(f, "<x: {}, y: {}, {}x{}>", x, y, w, h)
+    }
+}
+
+pub struct AztecCenter {
+    /// loc: (col, row)
     loc: (usize, usize),
+    /// mod_size is in pixels
     mod_size: f32
 }
 
 impl AztecCenter {
+    pub fn location(&self) -> (usize, usize) {
+        self.loc
+    }
+
     fn dst_sqd(&self, other: &AztecCenter) -> usize {
         let (ax, ay) = self.loc;
         let (bx, by) = other.loc;
@@ -69,6 +90,12 @@ impl AztecCenter {
         self.loc = ((ax + bx) / 2, (ay + by) / 2);
         self.mod_size = (self.mod_size + other.mod_size) / 2.0;
     }
+
+    pub fn as_marker(&self) -> Marker {
+        let (x, y) = self.loc;
+        let size = (self.mod_size * 7.0).ceil() as usize;
+        Marker::orange((x - size / 2, y - size / 2), (size, size))
+    }
 }
 
 fn div_ceil(a: isize, b: isize) -> isize {
@@ -78,6 +105,47 @@ fn div_ceil(a: isize, b: isize) -> isize {
         d + 1
     } else {
         d
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AztecCodeType {
+    Rune,
+    Compact,
+    FullSize
+}
+
+pub struct ReadAztecCode {
+    loc: (usize, usize),
+    size: (usize, usize),
+    center: AztecCenter,
+    layers: usize,
+    codewords: usize,
+    code_type: AztecCodeType
+}
+
+impl ReadAztecCode {
+
+    pub fn location(&self) -> (usize, usize) {
+        self.loc
+    }
+
+    pub fn size(&self) -> (usize, usize) {
+        self.size
+    }
+
+    pub fn center(&self) -> &AztecCenter {
+        &self.center
+    }
+
+    pub fn code_type(&self) -> AztecCodeType {
+        self.code_type
+    }
+}
+
+impl Into<String> for ReadAztecCode {
+    fn into(self) -> String {
+        todo!("Implement into string")
     }
 }
 
@@ -170,7 +238,8 @@ impl AztecReader {
 
         let total = total as i32;
         let new_total: usize = counts.iter().sum();
-        if self.check_ratio(&counts, new_total) {
+        if (new_total as i32 - total).abs() < 2 * total &&
+            self.check_ratio(&counts, new_total) {
             Some(self.center_from_end(&counts, row - 1))
         } else {
             None
@@ -252,10 +321,9 @@ impl AztecReader {
             while row >= i && col >= i && self.get_px(row - i, col - i)
                 == expected_col && counts[k] <= mid {
                 counts[k] += 1;
-                self.markers.push(Marker::green((col - i, row - i), (1, 1)));
                 i += 1;
             }
-            if row < i || col < i || counts[k] > total {
+            if row < i || col < i || counts[k] > mid {
                 return false;
             }
         }
@@ -275,10 +343,9 @@ impl AztecReader {
             while row+i < h && col+i < l && self.get_px(row + i, col + i)
                 == expected_col && counts[k] <= mid {
                 counts[k] += 1;
-                self.markers.push(Marker::orange((col + i, row + i), (1, 1)));
                 i += 1;
             }
-            if row + i >= h || col + i >= l || counts[k] > total {
+            if row + i >= h || col + i >= l || counts[k] > mid {
                 return false;
             }
         }
@@ -289,17 +356,49 @@ impl AztecReader {
             self.check_ratio(&counts, new_total)
     }
 
+    fn check_ring(&mut self, row: usize, col: usize, mod_size: f32,
+        ring_size: f32) -> bool {
+        let dst = (mod_size * ring_size).ceil() as usize;
+        let middle = dst / 2;
+        if col < middle || row < middle ||
+            col + middle > self.width || row + middle > self.height {
+            return false;
+        }
+
+        let mut counts = [0; 4];
+        for d in 0..dst {
+            /*
+            self.markers.push(Marker::green((col - middle + d, row - middle), (1,1)));
+            self.markers.push(Marker::red((col - middle, row - middle + d), (1,1)));
+            self.markers.push(Marker::orange((col + middle, row - middle + d), (1,1)));
+            self.markers.push(Marker::blue((col - middle + d, row + middle), (1,1)));
+            */
+            counts[0] += self.get_px(row - middle, col - middle + d) as usize;
+            counts[1] += self.get_px(row - middle + d, col - middle) as usize;
+            counts[2] += self.get_px(row - middle + d, col + middle) as usize;
+            counts[3] += self.get_px(row + middle, col - middle + d) as usize;
+        }
+
+        let target = (dst * 2) / 3;
+        let mut i = 0;
+        while i < 4 && counts[i] >= target {
+            i += 1;
+        }
+        i == 4
+    }
+
     fn handle_center(&mut self, counts: &[usize; 5], row: usize, col: usize,
         total: usize, centers: &mut Vec<AztecCenter>) -> Option<()> {
 
         let mid_val = counts[2] + counts[3] / 2;
         let center_col = self.center_from_end(counts, col);
         let center_row = self.check_vertical(row, center_col, mid_val, total)?;
-
         let center_col = self.check_horizontal(center_row,
             center_col, mid_val, total)?;
-        if self.check_diag(center_row, center_col, counts[2], total) {
-            let mod_size = total as f32 / 5.0;
+
+        let mod_size = total as f32 / 5.0;
+        if self.check_diag(center_row, center_col, mid_val, total)
+            && self.check_ring(center_row, center_col, mod_size, 4.0){
             let ct = AztecCenter { loc: (center_col, center_row), mod_size };
             for other in centers.iter_mut() {
                 if ct.dst_sqd(other) < 100 { // less than 10 pixels apart
@@ -351,25 +450,30 @@ impl AztecReader {
         centers
     }
 
+    fn process_entry(&mut self, center: AztecCenter) 
+        -> Result<ReadAztecCode, AztecReadError> {
+        let (col, row) = center.loc;
+
+        let code_type = if self.check_ring(row, col, center.mod_size, 12.0) {
+            AztecCodeType::FullSize
+        } else {
+            AztecCodeType::Compact
+        };
+
+        // TODO: Read overhead message + read content
+
+        let sz = center.mod_size as usize;
+        Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
+            code_type, center, layers: 0, codewords: 0 })
+    }
+
     fn get_px(&self, row: usize, col: usize) -> bool {
         self.image[row * self.width + col]
     }
 
-    pub fn read(&mut self) -> Result<String, AztecReadError> {
-        let centers = self.find_bullseyes();
-        if centers.is_empty() {
-            return Err(AztecReadError::NotFound);
-        }
-        for center in centers {
-            let (center_x, center_y) = center.loc;
-            let size = (center.mod_size * 7.0).ceil() as usize;
-            self.markers.push(Marker::orange((center_x - size / 2,
-                        center_y - size / 2), (size, size)));
-            println!("center: (x: {}, y: {}, mod_size: {})", center_x,
-                center_y, center.mod_size);
-        }
-        //todo!();
-        Err(AztecReadError::NotFound)
+    pub fn read(&mut self) -> Vec<Result<ReadAztecCode, AztecReadError>> {
+        self.find_bullseyes().into_iter()
+            .map(|center| self.process_entry(center)).collect()
     }
 }
 

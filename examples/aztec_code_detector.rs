@@ -1,5 +1,5 @@
-use image::ImageBuffer;
 use show_image::{ImageView, ImageInfo, create_window, event};
+use std::time::Instant;
 use std::env;
 
 use raztec::reader::AztecReader;
@@ -12,9 +12,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pixels: Vec<u8> = img.enumerate_pixels().map(|(_, _, p)| p[0]).collect();
     let mut reader = AztecReader::from_grayscale(img.dimensions(), &pixels);
 
-    match reader.read() {
-        Ok(code) => println!("Aztec Code Found {:?}", code),
-        Err(kind) => println!("{}", kind)
+    println!("Finding Aztec Codes...");
+    let start = Instant::now();
+    let results = reader.read();
+    println!("Done in {:?}", start.elapsed());
+    for code in results {
+        match code {
+            Ok(code) => {
+                println!("Found {:?} Aztec code at {:?}", code.code_type(),
+                    code.location());
+                reader.markers.push(code.center().as_marker());
+            },
+            Err(kind) => println!("Found invalid code, {}", kind)
+        }
     }
 
     let (width, height) = img.dimensions();
