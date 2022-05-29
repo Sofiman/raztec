@@ -10,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let img = image::open(args.get(1).unwrap()).unwrap().into_luma8();
     let pixels: Vec<u8> = img.enumerate_pixels().map(|(_, _, p)| p[0]).collect();
+    let (width, height) = img.dimensions();
     let mut reader = AztecReader::from_grayscale(img.dimensions(), &pixels);
 
     println!("Finding Aztec Codes...");
@@ -27,7 +28,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let (width, height) = img.dimensions();
     let mut pixels: Vec<u32> = pixels.iter().map(|&x| x <= 104)
         .map(|x| if x { 0 } else { 0xffffff }).collect();
     for marker in reader.markers.iter() {

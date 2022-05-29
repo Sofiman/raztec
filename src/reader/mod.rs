@@ -55,6 +55,10 @@ impl Marker {
     pub fn blue(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0x0000ff, loc, size }
     }
+
+    pub fn pink(loc: (usize, usize), size: (usize, usize)) -> Self {
+        Marker { color: 0xff79c6, loc, size }
+    }
 }
 
 impl Display for Marker {
@@ -93,7 +97,7 @@ impl AztecCenter {
 
     pub fn as_marker(&self) -> Marker {
         let (x, y) = self.loc;
-        let size = (self.mod_size * 7.0).ceil() as usize;
+        let size = (self.mod_size * 3.5).ceil() as usize;
         Marker::orange((x - size / 2, y - size / 2), (size, size))
     }
 }
@@ -189,7 +193,7 @@ impl AztecReader {
         col - counts[3..].iter().sum::<usize>() - counts[2] / 2
     }
 
-    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize, total: usize) -> Option<usize> {
+    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize, total: usize) -> Option<(usize, usize, usize)> {
         let mut row = start_row + 1;
         let mut counts = [0usize; 5];
 
@@ -213,6 +217,7 @@ impl AztecReader {
                 return None
             }
         }
+        let start = row;
 
         let l = self.height;
         row = start_row + 2;
@@ -240,13 +245,13 @@ impl AztecReader {
         let new_total: usize = counts.iter().sum();
         if (new_total as i32 - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
-            Some(self.center_from_end(&counts, row - 1))
+            Some((start, self.center_from_end(&counts, row - 1), row - 2))
         } else {
             None
         }
     }
 
-    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize, total: usize) -> Option<usize> {
+    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize, total: usize) -> Option<(usize, usize, usize)> {
         let mut col = start_col + 1;
         let mut counts = [0usize; 5];
 
@@ -270,6 +275,7 @@ impl AztecReader {
                 return None
             }
         }
+        let start = col;
 
         let l = self.width;
         col = start_col + 2;
@@ -297,7 +303,7 @@ impl AztecReader {
         let new_total: usize = counts.iter().sum();
         if (new_total as i32 - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
-            Some(self.center_from_end(&counts, col - 1))
+            Some((start, self.center_from_end(&counts, col - 1), col - 2))
         } else {
             None
         }
@@ -367,19 +373,17 @@ impl AztecReader {
 
         let mut counts = [0; 4];
         for d in 0..dst {
-            /*
             self.markers.push(Marker::green((col - middle + d, row - middle), (1,1)));
             self.markers.push(Marker::red((col - middle, row - middle + d), (1,1)));
             self.markers.push(Marker::orange((col + middle, row - middle + d), (1,1)));
             self.markers.push(Marker::blue((col - middle + d, row + middle), (1,1)));
-            */
             counts[0] += self.get_px(row - middle, col - middle + d) as usize;
             counts[1] += self.get_px(row - middle + d, col - middle) as usize;
             counts[2] += self.get_px(row - middle + d, col + middle) as usize;
             counts[3] += self.get_px(row + middle, col - middle + d) as usize;
         }
 
-        let target = (dst * 2) / 3;
+        let target = (dst * 3) / 4;
         let mut i = 0;
         while i < 4 && counts[i] >= target {
             i += 1;
@@ -387,18 +391,54 @@ impl AztecReader {
         i == 4
     }
 
+    fn closest_edge_from_point(&self, mut row: usize, mut col: usize, (dx, dy): (isize, isize)) -> (usize, usize) {
+        if row == 0 || col == 0 || row >= self.height || col >= self.width {
+            return (row, col);
+        }
+        while row > 0 && col > 0 && row < self.height && col < self.width &&
+            !self.get_px(row, col) {
+            row = (row as isize + dy) as usize;
+            col = (col as isize + dx) as usize;
+        }
+        (row, col)
+    }
+
     fn handle_center(&mut self, counts: &[usize; 5], row: usize, col: usize,
         total: usize, centers: &mut Vec<AztecCenter>) -> Option<()> {
 
         let mid_val = counts[2] + counts[3] / 2;
         let center_col = self.center_from_end(counts, col);
-        let center_row = self.check_vertical(row, center_col, mid_val, total)?;
-        let center_col = self.check_horizontal(center_row,
-            center_col, mid_val, total)?;
+        let (v_start, center_row, v_end) =
+            self.check_vertical(row, center_col, mid_val, total)?;
+        let (h_start, center_col, h_end) =
+            self.check_horizontal(center_row, center_col, mid_val, total)?;
 
         let mod_size = total as f32 / 5.0;
         if self.check_diag(center_row, center_col, mid_val, total)
             && self.check_ring(center_row, center_col, mod_size, 4.0){
+
+            /*
+            self.markers.push(Marker::green((h_start, v_start), (1,1)));
+            let (x, y) = self.closest_edge_from_point(v_start, h_start, (0, 1));
+            println!("top_left: {:?} => {:?}", (v_start, h_start), (x, y));
+            self.markers.push(Marker::green((y, x), (1,1)));
+
+            self.markers.push(Marker::red((h_end, v_start), (1,1)));
+            let (x, y) = self.closest_edge_from_point(v_start, h_end, (-1, 0));
+            println!("top_right: {:?} => {:?}", (v_start, h_end), (x, y));
+            self.markers.push(Marker::red((y, x), (1,1)));
+
+            self.markers.push(Marker::orange((h_start, v_end), (1,1)));
+            let (x, y) = self.closest_edge_from_point(v_end, h_start, (1, 0));
+            println!("bottom_left: {:?} => {:?}", (h_start, v_end), (x, y));
+            self.markers.push(Marker::orange((y, x), (1,1)));
+
+            self.markers.push(Marker::blue((h_end, v_end), (1,1)));
+            let (x, y) = self.closest_edge_from_point(v_end, h_end, (0, -1));
+            println!("bottom_right: {:?} => {:?}", (v_end, h_end), (x, y));
+            self.markers.push(Marker::blue((y, x), (1,1)));
+            */
+
             let ct = AztecCenter { loc: (center_col, center_row), mod_size };
             for other in centers.iter_mut() {
                 if ct.dst_sqd(other) < 100 { // less than 10 pixels apart
@@ -450,21 +490,105 @@ impl AztecReader {
         centers
     }
 
+    fn sample_block(&mut self, row: usize, col: usize, w: usize, h: usize) -> bool {
+        let mut bal: isize = 0;
+        let (w2, h2) = (w / 2, h / 2);
+        for i in 0..=w {
+            for j in 0..=h {
+                let nrow = row + j;
+                let ncol = col + i;
+                if nrow >= h2 && ncol >= w2 && nrow < self.height && ncol < self.width {
+                    self.markers.push(Marker::pink((ncol - h2, nrow - w2), (w, h)));
+                    bal += if self.get_px(nrow - h2, ncol - w2) { 1 } else { -1 };
+                }
+            }
+        }
+        bal > 0
+    }
+
+    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, block: usize) -> Vec<bool> {
+        let (col, row) = center.loc;
+
+        let dst = (center.mod_size * radius).ceil() as usize;
+        let middle = dst / 2;
+        if col < middle || row < middle ||
+            col + middle > self.width || row + middle > self.height {
+            return vec![];
+        }
+
+        let sample_count = dst / block + 1;
+        let bl = block / 2;
+        let mut sample = vec![false; sample_count * 4];
+        for i in 0..sample_count {
+            let d = i * block;
+
+            sample[i] = self.sample_block(row - middle - bl, col - middle + d - bl, bl, bl);
+            self.markers.push(Marker::green((col - middle + d - bl, row - middle - bl), (bl, bl)));
+
+            sample[i + sample_count] = self.sample_block(row - middle + d - bl, col + middle, bl, bl);
+            self.markers.push(Marker::orange((col + middle, row - middle + d - bl), (bl, bl)));
+
+            sample[i + 2 * sample_count] = self.sample_block(row + middle, col - middle + d + bl, bl, bl);
+            self.markers.push(Marker::blue((col - middle + d + bl, row + middle), (bl, bl)));
+
+            sample[i + 2 * sample_count] = self.sample_block(row - middle + d + bl, col - middle - bl, bl, bl);
+            self.markers.push(Marker::red((col - middle - bl, row - middle + d + bl), (bl, bl)));
+        }
+
+        sample
+    }
+
+    fn to_binary(arr: &[bool]) -> usize {
+        let mut val = 0;
+        for &v in arr {
+            val <<= 1;
+            val |= if v { 1 } else { 0 };
+        }
+        val
+    }
+
+    fn get_aztec_metadata(&self, code_type: AztecCodeType, message: &[bool]) -> Result<(usize, usize, AztecCodeType), AztecReadError> {
+        if code_type == AztecCodeType::FullSize {
+            let layers = Self::to_binary(&message[2..7]);
+            let codewords =
+                  (Self::to_binary(&message[8..13]) << 6) 
+                | (Self::to_binary(&message[16..20]) << 2) 
+                |  Self::to_binary(&message[21..23]);
+            println!("layers: {} ({:#04b})", layers + 1, layers);
+            println!("codewods: {} ({:#013b})", codewords + 1, codewords);
+            Ok((layers + 1, codewords + 1, code_type))
+        } else {
+            let layers = Self::to_binary(&message[2..4]);
+            let codewords = Self::to_binary(&message[4..9]) << 1 |
+                message[11] as usize;
+            //let ecc: Vec<u8> = message[10..].chunks(4).map(Self::to_binary).collect();
+            println!("layers: {} ({:#04b})", layers + 1, layers);
+            println!("codewods: {} ({:#08b})", codewords + 1, codewords);
+            Ok((layers + 1, codewords + 1, AztecCodeType::Compact))
+        }
+    }
+
     fn process_entry(&mut self, center: AztecCenter) 
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let code_type = if self.check_ring(row, col, center.mod_size, 12.0) {
+        let code_type = if self.check_ring(row, col, center.mod_size, 12.3) {
             AztecCodeType::FullSize
         } else {
             AztecCodeType::Compact
         };
 
-        // TODO: Read overhead message + read content
+        let pos = if code_type == AztecCodeType::FullSize { 13.5 } else { 9.5 };
+        let overhead_message = self.sample_ring(&center, pos,
+            center.mod_size.floor() as usize);
+        let (layers, codewords, code_type) =
+            self.get_aztec_metadata(code_type, &overhead_message)?;
+
+        // TODO: Read content
 
         let sz = center.mod_size as usize;
         Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
-            code_type, center, layers: 0, codewords: 0 })
+            code_type, center, layers, codewords })
     }
 
     fn get_px(&self, row: usize, col: usize) -> bool {
