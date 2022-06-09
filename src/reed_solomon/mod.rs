@@ -30,14 +30,19 @@ impl ReedSolomonEncoder {
     /// an iterator over these check codes.
     pub fn generate_check_codes(&self, data: &[usize], k: usize) ->
         impl Iterator<Item = usize> + '_ {
-        let coeffs: Vec<GFNum> = data.iter()
-            .map(|&x| self.gf.num(x)).rev().collect();
-        let mut poly = GFPoly::new(&self.gf, &coeffs);
-        poly <<= k;
+        let zero = self.gf.num(0);
+        let len = data.len();
+
+        let mut coeffs = vec![zero; len + k];
+        coeffs.splice(k.., data.iter().map(|&x| self.gf.num(x)).rev());
+        let poly = GFPoly::new(&self.gf, &coeffs);
 
         // Calculate the generator polynomial by calculating
         // the polynomial (x-2^1)(x-2^2)...(x-2^k)
-        let mut coeffs = vec![self.gf.num(0); k + 1];
+
+        // init
+        coeffs.truncate(k + 1); // reuse the allocated coeffs array
+        coeffs.fill(zero);
         coeffs[0] = self.gf.num(1);
 
         for i in 1..=k {

@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::{ops::{Add, Sub, Mul, Div, Index, Rem, MulAssign, ShlAssign, AddAssign},
+use std::{ops::{Add, Sub, Mul, Index, Rem, MulAssign, ShlAssign, AddAssign},
 fmt::{Display, Debug}, isize, vec::IntoIter};
 use super::gf::*;
 
@@ -237,59 +237,15 @@ impl<'a> ShlAssign<usize> for GFPoly<'a> {
     }
 }
 
-impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
-    type Output = (GFPoly<'a>, GFPoly<'a>);
-
-    fn div(self, _rhs: &Self) -> Self::Output {
-        todo!("fix me")
-        /*
-        let deg_d = rhs.deg();
-        if deg_d < 0 {
-            panic!("GFPoly division by zero");
-        }
-        let mut deg_r = self.deg();
-        if deg_r < 0 {
-            let zero1 = GFPoly { zero: self.zero, coeffs: vec![], deg: isize::MIN };
-            let zero2 = GFPoly { zero: self.zero, coeffs: vec![], deg: isize::MIN };
-            return (zero1, zero2);
-        }
-        if deg_r < deg_d {
-            panic!("The degree of the dividend must be greater or equal
-                to the degree of the divisor");
-        }
-        let mut q = GFPoly {
-            zero: self.zero,
-            coeffs: vec![self.zero; deg_r as usize + 1],
-            deg: isize::MIN
-        };
-        let mut r = self;
-        let mut divisor = rhs.clone();
-        let inv_lead = rhs.coeffs[deg_d as usize].inv();
-
-        while deg_r >= deg_d {
-            let lead = (deg_r - deg_d) as usize;
-            let coef = r.coeffs[deg_r as usize] * inv_lead;
-            q.coeffs[lead] = coef;
-            divisor *= coef;
-            divisor <<= lead;
-            r += &divisor; // here, it is actually a substraction
-            deg_r = r.deg();
-            divisor.clone_from(rhs); // set divisor back to rhs
-        }
-
-        (q, r)*/
-    }
-}
-
 impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
     type Output = GFPoly<'a>;
 
-    fn rem(self, rhs: &Self) -> Self::Output {
+    fn rem(self, rhs: &Self) -> Self {
         let deg_d = rhs.deg();
         if deg_d < 0 {
             panic!("GFPoly division by zero");
         }
-        let mut deg_r = self.deg();
+        let deg_r = self.deg();
         if deg_r < 0 {
             return GFPoly { zero: self.zero, coeffs: vec![], deg: isize::MIN };
         }
@@ -297,30 +253,32 @@ impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
             panic!("The degree of the dividend must be greater or equal
                 to the degree of the divisor");
         }
+
         let mut r = self;
-        let mut divisor = GFPoly {
-            zero: r.zero,
-            coeffs: vec![r.zero; deg_d as usize + 1],
-            deg: rhs.deg
-        };
+        let (mut deg_r, deg_d) = (deg_r as usize, deg_d as usize);
+        let inv_lead = rhs.coeffs[deg_d].inv();
 
-        let mut rhs_coeffs = rhs.coeffs.clone();
-        if rhs_coeffs.len() < divisor.coeffs.len() {
-            rhs_coeffs.extend(std::iter::repeat(r.zero)
-                .take(divisor.coeffs.len() - rhs_coeffs.len()));
-        }
-        divisor.coeffs.copy_from_slice(&rhs_coeffs);
-        let inv_lead = rhs.coeffs[deg_d as usize].inv();
-
+        // This is my own method to perform Polynomial "long" division ~Sofiman
         while deg_r >= deg_d {
-            let lead = (deg_r - deg_d) as usize;
-            divisor *= r.coeffs[deg_r as usize] * inv_lead;
-            divisor <<= lead;
-            r += &divisor; // here, it is actually a substraction
-            deg_r = r.deg();
-            divisor.coeffs.clone_from(&rhs_coeffs);
-            divisor.deg = rhs.deg;
+            let deg_diff = deg_r - deg_d;
+            let multiplier = r.coeffs[deg_r] * inv_lead;
+            let mut was_zero = true;
+
+            // Simulate shifting rhs by moving cursors i and j
+            for i in (0..=deg_d).rev() { // i points in the polynomial `rhs`
+                let j = deg_diff + i; // j points in the polynomial `r`
+                let new_coef = r.coeffs[j] + rhs.coeffs[i] * multiplier;
+                r.coeffs[j] = new_coef;
+
+                // find the new degree of the polynomial
+                if was_zero && new_coef == r.zero { 
+                    deg_r -= 1;
+                } else {
+                    was_zero = false;
+                }
+            }
         }
+        r.deg = deg_r as isize;
 
         r
     }
