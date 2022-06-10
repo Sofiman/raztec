@@ -1,7 +1,7 @@
 //! Aztec Reader module
 
 use std::fmt::Display;
-use super::{reed_solomon, AztecCode};
+use super::{reed_solomon::ReedSolomon, AztecCode};
 
 #[derive(Debug, Clone)]
 /// Represents the state in which the AztecReader has failed
@@ -539,12 +539,7 @@ impl AztecReader {
     }
 
     fn to_binary(arr: &[bool]) -> usize {
-        let mut val = 0;
-        for &v in arr {
-            val <<= 1;
-            val |= if v { 1 } else { 0 };
-        }
-        val
+        arr.iter().fold(0, |acc, &v| (acc << 1) | if v { 1 } else { 0 })
     }
 
     fn get_aztec_metadata(&self, code_type: AztecCodeType, message: &[bool]) -> Result<(usize, usize, AztecCodeType), AztecReadError> {
@@ -558,13 +553,21 @@ impl AztecReader {
             println!("codewods: {} ({:#013b})", codewords + 1, codewords);
             Ok((layers + 1, codewords + 1, code_type))
         } else {
-            let layers = Self::to_binary(&message[2..4]);
-            let codewords = Self::to_binary(&message[4..9]) << 1 |
-                message[11] as usize;
-            //let ecc: Vec<u8> = message[10..].chunks(4).map(Self::to_binary).collect();
-            println!("layers: {} ({:#04b})", layers + 1, layers);
-            println!("codewods: {} ({:#08b})", codewords + 1, codewords);
-            Ok((layers + 1, codewords + 1, AztecCodeType::Compact))
+            let mut ecc: Vec<usize> = message[10..].chunks(4)
+                .map(|x| Self::to_binary(x) as usize).collect();
+
+            let rs = ReedSolomon::new(4, 0b10011);
+            if let Ok(_) = rs.fix_errors(&mut ecc[..], 2) {
+                let layers = Self::to_binary(&message[2..4]);
+                let codewords = Self::to_binary(&message[4..9]) << 1 |
+                    message[11] as usize;
+
+                println!("layers: {} ({:#04b})", layers + 1, layers);
+                println!("codewods: {} ({:#08b})", codewords + 1, codewords);
+                Ok((layers + 1, codewords + 1, AztecCodeType::Compact))
+            } else {
+                Ok((0, 0, AztecCodeType::Rune))
+            }
         }
     }
 

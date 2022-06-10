@@ -15,19 +15,23 @@ use self::gf::*;
 use self::gf_poly::GFPoly;
 
 /// Reed Solomon error correction code generator
-pub struct ReedSolomonEncoder {
+pub struct ReedSolomon {
     gf: GF
 }
 
-impl ReedSolomonEncoder {
+impl ReedSolomon {
 
-    /// Create a new ReedSolomonEncoder in GF(2^m) with the specified primitive
+    /// Create a new ReedSolomon in GF(2^m) with the specified primitive
     pub fn new(m: u8, primitive: usize) -> Self {
-        ReedSolomonEncoder { gf: GF::new(m, primitive) }
+        ReedSolomon { gf: GF::new(m, primitive) }
     }
 
     /// Generates `k` Reed Solomon check codes using the `data` input. Returns
     /// an iterator over these check codes.
+    ///
+    /// # Arguments
+    /// * `data` - The input data
+    /// * `k` - Number of check codes to generate
     pub fn generate_check_codes(&self, data: &[usize], k: usize) ->
         impl Iterator<Item = usize> + '_ {
         let coeffs: Vec<GFNum> = data.iter()
@@ -53,6 +57,16 @@ impl ReedSolomonEncoder {
         let rem = poly % &generator;
         rem.into_coeffs().take(k).rev().map(|x| x.value())
     }
+
+    /// Decode the data payload and fix the possible errors in-place.
+    ///
+    /// # Arguments
+    /// * `data` - The input payload (received data + received check codes)
+    /// * `n` - The number of actual data packets in the data slice
+    pub fn fix_errors(&self, data: &mut [usize], n: usize)
+        -> Result<(), ()> {
+        todo!()
+    }
 }
 
 #[cfg(test)]
@@ -61,42 +75,51 @@ mod tests {
 
     #[test]
     fn test_generate_check_codes(){
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes: Vec<usize> = encoder
+        let rs = ReedSolomon::new(4, 0b10011);
+        let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0, 0b1001], 5).collect();
         assert_eq!(check_codes, [12, 2, 3, 1, 9]);
     }
 
     #[test]
     fn test_generate_check_codes2(){
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes: Vec<usize> = encoder
+        let rs = ReedSolomon::new(4, 0b10011);
+        let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0, 0b0100], 5).collect();
         assert_eq!(check_codes, [0b1010, 0b0011, 0b1011, 0b1000, 0b0100]);
     }
 
     #[test]
     fn test_generate_check_codes3(){
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes: Vec<usize> = encoder
+        let rs = ReedSolomon::new(4, 0b10011);
+        let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0b0101, 0b1010], 5).collect();
         assert_eq!(check_codes, [0b1110, 0b0111, 0b0101, 0b0000, 0b1011]);
     }
 
     #[test]
     fn test_generate_check_codes4(){
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
-        let check_codes: Vec<usize> = encoder
+        let rs = ReedSolomon::new(4, 0b10011);
+        let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0b1111, 0b0000], 5).collect();
         assert_eq!(check_codes, [0b0111, 0b1000, 0b0111, 0b1001, 0b0011]);
     }
 
     #[test]
     fn test_generate_check_big(){
-        let encoder = ReedSolomonEncoder::new(6, 0b1000011);
-        let check_codes: Vec<usize> = encoder
+        let rs = ReedSolomon::new(6, 0b1000011);
+        let check_codes: Vec<usize> = rs
             .generate_check_codes(&[39, 50, 1, 28, 7, 2, 42, 40, 37, 15], 7)
             .collect();
         assert_eq!(check_codes, [44, 29, 43, 52, 49, 22, 15]);
+    }
+
+    #[test]
+    fn test_fix_errors(){
+        let mut inp = [0b0101, 0b1101, 0b0111, 0b1001, 0b0101, 0b0000, 0b1011];
+        let     exp = [0b0101, 0b1010, 0b1110, 0b0111, 0b0101, 0b0000, 0b1011];
+        let rs = ReedSolomon::new(4, 0b10011);
+        //rs.fix_errors(&mut inp, 2).unwrap();
+        //assert_eq!(inp, exp);
     }
 }

@@ -27,7 +27,7 @@
 //!use raztec::writer::build_rune;
 //!let code = build_rune(38);
 //! ```
-use super::{*, reed_solomon::ReedSolomonEncoder};
+use super::{*, reed_solomon::ReedSolomon};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
@@ -220,7 +220,7 @@ impl AztecWriter {
 
         let layers = self.layers - 1;
         let words = self.codewords - 1;
-        let encoder = ReedSolomonEncoder::new(4, 0b10011);
+        let rs = ReedSolomon::new(4, 0b10011);
 
         let (words, data) =
             if self.compact {
@@ -228,7 +228,7 @@ impl AztecWriter {
                     (layers << 2) | ((words >> 4) & 3),
                     words & 15
                 ];
-                data.extend(encoder.generate_check_codes(&data, 5));
+                data.extend(rs.generate_check_codes(&data, 5));
                 (28, data)
             } else {
                 let mut data = vec![
@@ -237,7 +237,7 @@ impl AztecWriter {
                     (words & 0b00011110000) >> 4,
                     words & 0b00000001111,
                 ];
-                data.extend(encoder.generate_check_codes(&data, 6));
+                data.extend(rs.generate_check_codes(&data, 6));
                 (40, data)
             };
 
@@ -753,7 +753,7 @@ impl AztecCodeBuilder {
 
         let codewords = bitstr.len() / codeword_size;
         let to_fill = (bits_in_layers - bitstr.len()) / codeword_size;
-        let rs = ReedSolomonEncoder::new(codeword_size as u8, prim);
+        let rs = ReedSolomon::new(codeword_size as u8, prim);
 
         let check_words = rs.generate_check_codes(&words, to_fill);
         if codeword_size > 8 {
@@ -786,12 +786,12 @@ impl Default for AztecCodeBuilder {
 pub fn build_rune(data: u8) -> AztecCode {
     let mut code = AztecCode::new(true, 11);
 
-    let encoder = ReedSolomonEncoder::new(4, 0b10011);
+    let rs = ReedSolomon::new(4, 0b10011);
     let mut data = vec![
         ((data >> 4) & 0b1111) as usize,
         (data & 0b1111) as usize
     ];
-    data.extend(encoder.generate_check_codes(&data, 5));
+    data.extend(rs.generate_check_codes(&data, 5));
 
     let mut service_message = vec![false; 28];
     let mut i = 0;
