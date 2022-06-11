@@ -66,17 +66,40 @@ impl ReedSolomon {
     /// Decode the data payload and fix the possible errors in-place.
     ///
     /// # Arguments
-    /// * `data` - The input payload (received data + received check codes)
-    /// * `n` - The number of actual data packets in the data slice
-    pub fn fix_errors(&self, data: &mut [usize], n: usize)
-        -> Result<(), ()> {
-        todo!()
+    /// * `msg` - The input payload (received data + received check codes)
+    /// * `k` - The number of check codes within the data slice
+    pub fn fix_errors(&self, msg: &mut [usize], k: usize) -> Result<(), String> {
+        let coeffs: Vec<GFNum> = msg.iter()
+            .map(|&x| self.gf.num(x)).rev().collect();
+        let msg_poly = GFPoly::new(&self.gf, &coeffs);
+        let s = self.syndromes(&msg_poly, k);
+        if s.deg() == isize::MIN { // s(X) = 0 <=> no errors
+            return Ok(());
+        }
+        Err(format!("fix_errors todo!(): {}", s.deg()))
+    }
+
+    fn syndromes<'a>(&'a self, poly: &'a GFPoly, k: usize) -> GFPoly<'a> {
+        let mut coeffs = vec![self.gf.num(0); k];
+        for i in 1..=k {
+            let p = self.gf.exp2(self.gf.num(i));
+            coeffs[i - 1] = poly.eval(p);
+        }
+        GFPoly::new(&self.gf, &coeffs)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_generate_check_codes_zero(){
+        let rs = ReedSolomon::new(4, 0b10011);
+        let check_codes: Vec<usize> = rs
+            .generate_check_codes(&[0, 0], 3).collect();
+        assert_eq!(check_codes, [0, 0, 0]);
+    }
 
     #[test]
     fn test_generate_check_codes(){
@@ -117,6 +140,27 @@ mod tests {
             .generate_check_codes(&[39, 50, 1, 28, 7, 2, 42, 40, 37, 15], 7)
             .collect();
         assert_eq!(check_codes, [44, 29, 43, 52, 49, 22, 15]);
+    }
+
+    #[test]
+    fn test_syndromes_with_valid_code(){
+        let inp: Vec<usize> = [0, 0b1001, 12, 2, 3, 1, 9].into_iter().rev()
+            .collect();
+        let rs = ReedSolomon::new(4, 0b10011);
+        let inp_poly = GFPoly::from_nums(&rs.gf, &inp);
+        assert_eq!(GFPoly::zero(&rs.gf), rs.syndromes(&inp_poly, 5));
+    }
+
+    #[test]
+    fn test_syndromes_with_corrupted_code(){
+        // original: [15, 0, 7, 8, 7, 9, 3]
+        // corrupted: [8, 10, 7, 8, 7, 9, 3]
+        let inp = [0b1000, 0b1010, 0b0111, 0b1000, 0b0111, 0b1001, 0b0011]
+            .into_iter().rev().collect::<Vec<usize>>();
+        let exp = [5, 6, 13, 13, 11];
+        let rs = ReedSolomon::new(4, 0b10011);
+        let inp_poly = GFPoly::from_nums(&rs.gf, &inp);
+        assert_eq!(GFPoly::from_nums(&rs.gf, &exp), rs.syndromes(&inp_poly, 5));
     }
 
     #[test]

@@ -247,7 +247,7 @@ impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
         }
         let deg_r = self.deg();
         if deg_r < 0 {
-            return GFPoly { zero: self.zero, coeffs: vec![], deg: isize::MIN };
+            return self;
         }
         if deg_r < deg_d {
             panic!("The degree of the dividend must be greater or equal

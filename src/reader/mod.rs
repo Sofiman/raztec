@@ -7,7 +7,8 @@ use super::{reed_solomon::ReedSolomon, AztecCode};
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
     BadSymbolOrientation(Marker, String),
-    InvalidSize(Marker, String)
+    InvalidSize(Marker, String),
+    ReedSolomonFailed(String)
 }
 
 impl AztecReadError {
@@ -19,7 +20,9 @@ impl AztecReadError {
                 format!("Orientation detection for symbol at {} failed: {}",
                     mk, msg),
             InvalidSize(mk, msg) =>
-                format!("Symbol at {} has an invalid size: {}", mk, msg)
+                format!("Symbol at {} has an invalid size: {}", mk, msg),
+            ReedSolomonFailed(msg) =>
+                format!("Reed Solomon failed: {}", msg)
         }
     }
 }
@@ -373,10 +376,12 @@ impl AztecReader {
 
         let mut counts = [0; 4];
         for d in 0..dst {
+            /*
             self.markers.push(Marker::green((col - middle + d, row - middle), (1,1)));
             self.markers.push(Marker::red((col - middle, row - middle + d), (1,1)));
             self.markers.push(Marker::orange((col + middle, row - middle + d), (1,1)));
             self.markers.push(Marker::blue((col - middle + d, row + middle), (1,1)));
+            */
             counts[0] += self.get_px(row - middle, col - middle + d) as usize;
             counts[1] += self.get_px(row - middle + d, col - middle) as usize;
             counts[2] += self.get_px(row - middle + d, col + middle) as usize;
@@ -528,10 +533,10 @@ impl AztecReader {
             sample[i + sample_count] = self.sample_block(row - middle + d - bl, col + middle, bl, bl);
             self.markers.push(Marker::orange((col + middle, row - middle + d - bl), (bl, bl)));
 
-            sample[i + 2 * sample_count] = self.sample_block(row + middle, col - middle + d + bl, bl, bl);
+            sample[sample_count - 1 - i + 2 * sample_count] = self.sample_block(row + middle, col - middle + d + bl, bl, bl);
             self.markers.push(Marker::blue((col - middle + d + bl, row + middle), (bl, bl)));
 
-            sample[i + 2 * sample_count] = self.sample_block(row - middle + d + bl, col - middle - bl, bl, bl);
+            sample[sample_count - 1 - i + 3 * sample_count] = self.sample_block(row - middle + d + bl, col - middle - bl, bl, bl);
             self.markers.push(Marker::red((col - middle - bl, row - middle + d + bl), (bl, bl)));
         }
 
@@ -542,31 +547,83 @@ impl AztecReader {
         arr.iter().fold(0, |acc, &v| (acc << 1) | if v { 1 } else { 0 })
     }
 
-    fn get_aztec_metadata(&self, code_type: AztecCodeType, message: &[bool]) -> Result<(usize, usize, AztecCodeType), AztecReadError> {
+    fn get_aztec_metadata(&self, code_type: AztecCodeType, message: &[bool])
+        -> Result<(usize, usize, AztecCodeType), AztecReadError> {
         if code_type == AztecCodeType::FullSize {
-            let layers = Self::to_binary(&message[2..7]);
-            let codewords =
-                  (Self::to_binary(&message[8..13]) << 6) 
-                | (Self::to_binary(&message[16..20]) << 2) 
-                |  Self::to_binary(&message[21..23]);
-            println!("layers: {} ({:#04b})", layers + 1, layers);
-            println!("codewods: {} ({:#013b})", codewords + 1, codewords);
+            if message.len() != 56 {
+                return Err(AztecReadError::ReedSolomonFailed("Invalid message size".to_owned()));
+            }
+            // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55
+            // skips:   v v _ _ _ _ _ v _ _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v
+            let mut skips = 1;
+            let mut codeword = 0;
+            let mut codeword_size = 0;
+            let mut block = 5;
+            let mut corner = true;
+            let mut msg = vec![];
+            let mut i = 0;
+            while i < 56 {
+                if block == 5 {
+                    if (corner && skips == 3) || (!corner && skips == 1) {
+                        skips = 0;
+                        block = 0;
+                        corner = !corner;
+                    } else {
+                        skips += 1;
+                        i += 1;
+                    }
+                } else {
+                    if codeword_size == 4 {
+                        msg.push(codeword);
+                        codeword = 0;
+                        codeword_size = 0;
+                    }
+                    block += 1;
+                    codeword_size += 1;
+                    codeword = (codeword << 1) | message[i] as usize;
+                    i += 1;
+                }
+            }
+            msg.push(codeword);
+            let rs = ReedSolomon::new(4, 0b10011);
+
+            rs.fix_errors(&mut msg, 6)
+                .map_err(|msg| AztecReadError::ReedSolomonFailed(msg))?;
+
+            let layers = (msg[0] << 1) | (msg[1] & 0b1000) >> 3;
+            let codewords = ((msg[1] & 0b111) << 8) | (msg[2] << 4) | msg[3];
             Ok((layers + 1, codewords + 1, code_type))
         } else {
-            let mut ecc: Vec<usize> = message[10..].chunks(4)
+            // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
+            // skips:   v v _ _ _ _ _ _ _ v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v
+            if message.len() != 40 {
+                return Err(AztecReadError::ReedSolomonFailed("Invalid message size".to_owned()));
+            }
+            let mut msg: Vec<usize> = message.iter().enumerate()
+                .filter_map(|(i, &x)| {
+                    let idx = i % 10;
+                    if idx == 0 || idx == 1 || idx == 9 {
+                        None
+                    } else {
+                        Some(x)
+                    }
+                }).collect::<Vec<bool>>().as_slice().chunks(4)
                 .map(|x| Self::to_binary(x) as usize).collect();
 
             let rs = ReedSolomon::new(4, 0b10011);
-            if let Ok(_) = rs.fix_errors(&mut ecc[..], 2) {
-                let layers = Self::to_binary(&message[2..4]);
-                let codewords = Self::to_binary(&message[4..9]) << 1 |
-                    message[11] as usize;
 
-                println!("layers: {} ({:#04b})", layers + 1, layers);
-                println!("codewods: {} ({:#08b})", codewords + 1, codewords);
+            if let Ok(_) = rs.fix_errors(&mut msg, 5) {
+                let layers = msg[0] >> 2;
+                let codewords = ((msg[0] & 0b11) << 4) | msg[1];
                 Ok((layers + 1, codewords + 1, AztecCodeType::Compact))
-            } else {
-                Ok((0, 0, AztecCodeType::Rune))
+            } else { // maybe it is an Aztec Rune
+                for b in msg.iter_mut() {
+                    *b ^= 0b1010;
+                }
+                rs.fix_errors(&mut msg, 5)
+                    .map_err(|msg| AztecReadError::ReedSolomonFailed(msg))?;
+
+                Ok((0, (msg[0] << 4) | msg[1], AztecCodeType::Rune))
             }
         }
     }
@@ -583,13 +640,20 @@ impl AztecReader {
 
         let pos = if code_type == AztecCodeType::FullSize { 13.5 } else { 9.5 };
         let overhead_message = self.sample_ring(&center, pos,
-            center.mod_size.floor() as usize);
+            (center.mod_size).round() as usize);
         let (layers, codewords, code_type) =
             self.get_aztec_metadata(code_type, &overhead_message)?;
 
+        let sz = center.mod_size as usize;
+        if code_type == AztecCodeType::Rune {
+            println!("rune: {}", codewords);
+            return Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
+                code_type, center, layers, codewords })
+        }
+
+        println!("{} layers, {} codewords", layers, codewords);
         // TODO: Read content
 
-        let sz = center.mod_size as usize;
         Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
             code_type, center, layers, codewords })
     }
