@@ -7,8 +7,8 @@ use super::{reed_solomon::ReedSolomon, AztecCode};
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
     BadSymbolOrientation(Marker, String),
-    InvalidSize(Marker, String),
-    ReedSolomonFailed(String)
+    CorruptedFormat(Marker, String),
+    CorruptedMessage(Marker, String),
 }
 
 impl AztecReadError {
@@ -19,17 +19,17 @@ impl AztecReadError {
             BadSymbolOrientation(mk, msg) =>
                 format!("Orientation detection for symbol at {} failed: {}",
                     mk, msg),
-            InvalidSize(mk, msg) =>
-                format!("Symbol at {} has an invalid size: {}", mk, msg),
-            ReedSolomonFailed(msg) =>
-                format!("Reed Solomon failed: {}", msg)
+            CorruptedFormat(mk, msg) =>
+                format!("Symbol at {} has an corrupted format: {}", mk, msg),
+            CorruptedMessage(mk, msg) =>
+                format!("Symbol at {} has an corrupted message: {}", mk, msg),
         }
     }
 }
 
 impl Display for AztecReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AztecReadError({})", self.message())
+        write!(f, "{}", self.message())
     }
 }
 
@@ -196,7 +196,8 @@ impl AztecReader {
         col - counts[3..].iter().sum::<usize>() - counts[2] / 2
     }
 
-    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize, total: usize) -> Option<(usize, usize, usize)> {
+    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize,
+        total: usize) -> Option<(usize, usize, usize)> {
         let mut row = start_row + 1;
         let mut counts = [0usize; 5];
 
@@ -254,7 +255,8 @@ impl AztecReader {
         }
     }
 
-    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize, total: usize) -> Option<(usize, usize, usize)> {
+    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize,
+        total: usize) -> Option<(usize, usize, usize)> {
         let mut col = start_col + 1;
         let mut counts = [0usize; 5];
 
@@ -312,7 +314,8 @@ impl AztecReader {
         }
     }
 
-    fn check_diag(&mut self, row: usize, col: usize, mid: usize, total: usize) -> bool {
+    fn check_diag(&mut self, row: usize, col: usize, mid: usize, total: usize)
+        -> bool {
         let mut counts = [0usize; 5];
         let mut i = 0;
 
@@ -396,7 +399,8 @@ impl AztecReader {
         i == 4
     }
 
-    fn closest_edge_from_point(&self, mut row: usize, mut col: usize, (dx, dy): (isize, isize)) -> (usize, usize) {
+    fn closest_edge_from_point(&self, mut row: usize, mut col: usize,
+        (dx, dy): (isize, isize)) -> (usize, usize) {
         if row == 0 || col == 0 || row >= self.height || col >= self.width {
             return (row, col);
         }
@@ -495,7 +499,8 @@ impl AztecReader {
         centers
     }
 
-    fn sample_block(&mut self, row: usize, col: usize, w: usize, h: usize) -> bool {
+    fn sample_block(&mut self, row: usize, col: usize, w: usize, h: usize)
+        -> bool {
         let mut bal: isize = 0;
         let (w2, h2) = (w / 2, h / 2);
         for i in 0..=w {
@@ -511,7 +516,8 @@ impl AztecReader {
         bal > 0
     }
 
-    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, block: usize) -> Vec<bool> {
+    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, block: usize)
+        -> Vec<bool> {
         let (col, row) = center.loc;
 
         let dst = (center.mod_size * radius).ceil() as usize;
@@ -527,124 +533,130 @@ impl AztecReader {
         for i in 0..sample_count {
             let d = i * block;
 
-            sample[i] = self.sample_block(row - middle - bl, col - middle + d - bl, bl, bl);
-            self.markers.push(Marker::green((col - middle + d - bl, row - middle - bl), (bl, bl)));
+            sample[i] = self.sample_block(row - middle - bl,
+                col - middle + d - bl, bl, bl);
+            self.markers.push(Marker::green((col - middle + d - bl,
+                row - middle - bl), (bl, bl)));
 
-            sample[i + sample_count] = self.sample_block(row - middle + d - bl, col + middle, bl, bl);
-            self.markers.push(Marker::orange((col + middle, row - middle + d - bl), (bl, bl)));
+            sample[i + sample_count] = self.sample_block(row - middle + d - bl,
+                col + middle, bl, bl);
+            self.markers.push(Marker::orange((col + middle,
+                row - middle + d - bl), (bl, bl)));
 
-            sample[sample_count - 1 - i + 2 * sample_count] = self.sample_block(row + middle, col - middle + d + bl, bl, bl);
-            self.markers.push(Marker::blue((col - middle + d + bl, row + middle), (bl, bl)));
+            sample[sample_count - 1 - i + 2 * sample_count] =
+                self.sample_block(row + middle, col - middle + d + bl, bl, bl);
+            self.markers.push(Marker::blue((col - middle + d + bl,
+                row + middle), (bl, bl)));
 
-            sample[sample_count - 1 - i + 3 * sample_count] = self.sample_block(row - middle + d + bl, col - middle - bl, bl, bl);
-            self.markers.push(Marker::red((col - middle - bl, row - middle + d + bl), (bl, bl)));
+            sample[sample_count - 1 - i + 3 * sample_count] =
+                self.sample_block(row-middle+d+bl, col - middle - bl, bl, bl);
+            self.markers.push(Marker::red((col - middle - bl,
+                row - middle + d + bl), (bl, bl)));
         }
 
         sample
     }
 
-    fn to_binary(arr: &[bool]) -> usize {
-        arr.iter().fold(0, |acc, &v| (acc << 1) | if v { 1 } else { 0 })
-    }
+    fn get_aztec_metadata(&self, mk: Marker, code_type: &mut AztecCodeType,
+        message: &[bool]) -> Result<(usize, usize), AztecReadError> {
 
-    fn get_aztec_metadata(&self, code_type: AztecCodeType, message: &[bool])
-        -> Result<(usize, usize, AztecCodeType), AztecReadError> {
-        if code_type == AztecCodeType::FullSize {
-            if message.len() != 56 {
-                return Err(AztecReadError::ReedSolomonFailed("Invalid message size".to_owned()));
-            }
-            // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55
-            // skips:   v v _ _ _ _ _ v _ _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v
-            let mut skips = 1;
-            let mut codeword = 0;
-            let mut codeword_size = 0;
-            let mut block = 5;
-            let mut corner = true;
-            let mut msg = vec![];
-            let mut i = 0;
-            while i < 56 {
-                if block == 5 {
-                    if (corner && skips == 3) || (!corner && skips == 1) {
-                        skips = 0;
-                        block = 0;
+        let (len, block_size, count) =
+            if *code_type == AztecCodeType::FullSize {
+                (56, 5u8, 10)
+            } else {
+                (40, 7u8, 7)
+            };
+
+        if message.len() != len {
+            return Err(AztecReadError::CorruptedFormat(mk,
+                    "Invalid message size".to_owned()));
+        }
+        let mut skips = 1u8;
+        let mut codeword = 0;
+        let mut codeword_size = 0u8;
+        let mut block = block_size;
+        let mut corner = true;
+        let mut msg = vec![0; count];
+        let mut i = 0;
+        let mut j = 0;
+        while i < len {
+            if block == block_size {
+                let exp = if corner { 3 } else { 1 };
+                if skips == exp {
+                    skips = 0;
+                    block = 0;
+                    if *code_type == AztecCodeType::FullSize {
                         corner = !corner;
-                    } else {
-                        skips += 1;
-                        i += 1;
                     }
                 } else {
-                    if codeword_size == 4 {
-                        msg.push(codeword);
-                        codeword = 0;
-                        codeword_size = 0;
-                    }
-                    block += 1;
-                    codeword_size += 1;
-                    codeword = (codeword << 1) | message[i] as usize;
+                    skips += 1;
                     i += 1;
                 }
+            } else {
+                if codeword_size == 4 {
+                    msg[j] = codeword;
+                    j += 1;
+                    codeword = 0;
+                    codeword_size = 0;
+                }
+                block += 1;
+                codeword_size += 1;
+                codeword = (codeword << 1) | message[i] as usize;
+                i += 1;
             }
-            msg.push(codeword);
-            let rs = ReedSolomon::new(4, 0b10011);
+        }
+        msg[j] = codeword;
+
+        let rs = ReedSolomon::new(4, 0b10011);
+        if *code_type == AztecCodeType::FullSize {
+            // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55
+            // skips:   v v _ _ _ _ _ v _ _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v  v  v  _  _  _  _  _  v  _  _  _  _  _  v
 
             rs.fix_errors(&mut msg, 6)
-                .map_err(|msg| AztecReadError::ReedSolomonFailed(msg))?;
+                .map_err(|msg| AztecReadError::CorruptedFormat(mk, msg))?;
 
             let layers = (msg[0] << 1) | (msg[1] & 0b1000) >> 3;
             let codewords = ((msg[1] & 0b111) << 8) | (msg[2] << 4) | msg[3];
-            Ok((layers + 1, codewords + 1, code_type))
+            Ok((layers + 1, codewords + 1))
         } else {
             // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
             // skips:   v v _ _ _ _ _ _ _ v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v
-            if message.len() != 40 {
-                return Err(AztecReadError::ReedSolomonFailed("Invalid message size".to_owned()));
-            }
-            let mut msg: Vec<usize> = message.iter().enumerate()
-                .filter_map(|(i, &x)| {
-                    let idx = i % 10;
-                    if idx == 0 || idx == 1 || idx == 9 {
-                        None
-                    } else {
-                        Some(x)
-                    }
-                }).collect::<Vec<bool>>().as_slice().chunks(4)
-                .map(|x| Self::to_binary(x) as usize).collect();
-
-            let rs = ReedSolomon::new(4, 0b10011);
 
             if let Ok(_) = rs.fix_errors(&mut msg, 5) {
                 let layers = msg[0] >> 2;
                 let codewords = ((msg[0] & 0b11) << 4) | msg[1];
-                Ok((layers + 1, codewords + 1, AztecCodeType::Compact))
+                Ok((layers + 1, codewords + 1))
             } else { // maybe it is an Aztec Rune
                 for b in msg.iter_mut() {
                     *b ^= 0b1010;
                 }
                 rs.fix_errors(&mut msg, 5)
-                    .map_err(|msg| AztecReadError::ReedSolomonFailed(msg))?;
+                    .map_err(|msg| AztecReadError::CorruptedFormat(mk, msg))?;
 
-                Ok((0, (msg[0] << 4) | msg[1], AztecCodeType::Rune))
+                *code_type = AztecCodeType::Rune;
+                Ok((0, (msg[0] << 4) | msg[1]))
             }
         }
     }
 
-    fn process_entry(&mut self, center: AztecCenter) 
+    fn process_entry(&mut self, center: AztecCenter)
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let code_type = if self.check_ring(row, col, center.mod_size, 12.3) {
-            AztecCodeType::FullSize
-        } else {
-            AztecCodeType::Compact
-        };
+        let mut code_type =
+            if self.check_ring(row, col, center.mod_size, 12.3) {
+                AztecCodeType::FullSize
+            } else {
+                AztecCodeType::Compact
+            };
 
-        let pos = if code_type == AztecCodeType::FullSize { 13.5 } else { 9.5 };
-        let overhead_message = self.sample_ring(&center, pos,
-            (center.mod_size).round() as usize);
-        let (layers, codewords, code_type) =
-            self.get_aztec_metadata(code_type, &overhead_message)?;
+        let sz = center.mod_size.round() as usize;
+        let r = if code_type == AztecCodeType::FullSize { 13.5 } else { 9.5 };
+        let overhead_message = self.sample_ring(&center, r, sz);
+        let (layers, codewords) =
+            self.get_aztec_metadata(center.as_marker(), &mut code_type,
+            &overhead_message)?;
 
-        let sz = center.mod_size as usize;
         if code_type == AztecCodeType::Rune {
             println!("rune: {}", codewords);
             return Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
@@ -652,7 +664,10 @@ impl AztecReader {
         }
 
         println!("{} layers, {} codewords", layers, codewords);
-        // TODO: Read content
+
+        for l in 1..=(layers*2) { // TODO: Read content
+            self.sample_ring(&center, r + 1.0 + 2.0 * l as f32, sz);
+        }
 
         Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
             code_type, center, layers, codewords })
