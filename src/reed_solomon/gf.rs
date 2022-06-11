@@ -127,7 +127,7 @@ impl Debug for GF {
     }
 }
 
-#[derive(Debug, Copy, PartialEq)]
+#[derive(Copy, PartialEq)]
 pub struct GFNum<'a> {
     gf: &'a GF,
     val: usize
@@ -202,6 +202,12 @@ impl<'a> Div for GFNum<'a> {
 }
 
 impl Display for GFNum<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.val)
+    }
+}
+
+impl Debug for GFNum<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.val)
     }

@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::{ops::{Add, Sub, Mul, Index, Rem, MulAssign, ShlAssign, AddAssign},
+use std::{ops::{Add, Sub, Mul, Div, Index, Rem, MulAssign, ShlAssign, AddAssign},
 fmt::{Display, Debug}, isize, vec::IntoIter};
 use super::gf::*;
 
@@ -65,6 +65,15 @@ impl<'a> GFPoly<'a> {
             p = p * x;
         }
         result
+    }
+
+    pub fn gcd(&'a self, b: &'a GFPoly) -> GFPoly<'a> {
+        let mut a = self.clone();
+        let mut b = (*b).clone();
+        while b.deg() >= 0 {
+            (a, b) = (b.clone(), a % &b);
+        }
+        a
     }
 }
 
@@ -237,6 +246,14 @@ impl<'a> ShlAssign<usize> for GFPoly<'a> {
     }
 }
 
+impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
+    type Output = (GFPoly<'a>, GFPoly<'a>);
+
+    fn div(self, _rhs: &Self) -> (Self, Self) {
+        todo!()
+    }
+}
+
 impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
     type Output = GFPoly<'a>;
 
@@ -245,40 +262,39 @@ impl<'a> Rem<&GFPoly<'a>> for GFPoly<'a> {
         if deg_d < 0 {
             panic!("GFPoly division by zero");
         }
-        let deg_r = self.deg();
-        if deg_r < 0 {
-            return self;
-        }
+        let mut deg_r = self.deg();
         if deg_r < deg_d {
-            panic!("The degree of the dividend must be greater or equal
-                to the degree of the divisor");
+            return self;
         }
 
         let mut r = self;
-        let (mut deg_r, deg_d) = (deg_r as usize, deg_d as usize);
-        let inv_lead = rhs.coeffs[deg_d].inv();
+        let inv_lead = rhs.coeffs[deg_d as usize].inv();
 
         // This is my own method to perform Polynomial "long" division ~Sofiman
         while deg_r >= deg_d {
-            let deg_diff = deg_r - deg_d;
-            let multiplier = r.coeffs[deg_r] * inv_lead;
+            let deg_diff = (deg_r - deg_d) as usize;
+            let multiplier = r.coeffs[deg_r as usize] * inv_lead;
             let mut was_zero = true;
 
             // Simulate shifting rhs by moving cursors i and j
-            for i in (0..=deg_d).rev() { // i points in the polynomial `rhs`
+            for i in (0..=(deg_d as usize)).rev() {
+                // i points in the polynomial `rhs`
                 let j = deg_diff + i; // j points in the polynomial `r`
                 let new_coef = r.coeffs[j] + rhs.coeffs[i] * multiplier;
                 r.coeffs[j] = new_coef;
 
                 // find the new degree of the polynomial
-                if was_zero && new_coef == r.zero { 
+                if was_zero && new_coef == r.zero {
                     deg_r -= 1;
                 } else {
                     was_zero = false;
                 }
             }
         }
-        r.deg = deg_r as isize;
+        while deg_r >= 0 && r.coeffs[deg_r as usize] == r.zero {
+            deg_r -= 1;
+        }
+        r.deg = if deg_r < 0 { isize::MIN } else { deg_r };
 
         r
     }
@@ -544,5 +560,29 @@ mod tests {
         let a = GFPoly::from_nums(&gf, &[4, 3, 3, 7, 1, 2, 6, 1]);
         let b = GFPoly::from_nums(&gf, &[1, 0, 0, 3, 1]);
         assert_eq!(a % &b, GFPoly::from_nums(&gf, &[1, 14, 6, 9]));
+    }
+
+    #[test]
+    fn test_gf_poly_gcd(){
+        let gf: GF = GF::new(4, 0b10011);
+        let a = GFPoly::from_nums(&gf, &[1, 0, 1]);
+        let b = GFPoly::from_nums(&gf, &[1, 1]);
+        assert_eq!(a.gcd(&b), GFPoly::from_nums(&gf, &[1, 1]));
+    }
+
+    #[test]
+    fn test_gf_poly_gcd2(){
+        let gf: GF = GF::new(4, 0b10011);
+        let a = GFPoly::from_nums(&gf, &[1, 2, 2, 1]);
+        let b = GFPoly::from_nums(&gf, &[1, 0, 2, 1]);
+        assert_eq!(a.gcd(&b), GFPoly::from_nums(&gf, &[1]));
+    }
+
+    #[test]
+    fn test_gf_poly_gcd3(){
+        let gf: GF = GF::new(4, 0b10011);
+        let a = GFPoly::from_nums(&gf, &[1, 5, 0, 2]);
+        let b = GFPoly::from_nums(&gf, &[3, 2, 3, 6, 3]);
+        assert_eq!(a.gcd(&b), GFPoly::from_nums(&gf, &[11]));
     }
 }

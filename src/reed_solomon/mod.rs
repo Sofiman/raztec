@@ -59,26 +59,56 @@ impl ReedSolomon {
         }
         let generator = GFPoly::new(&self.gf, &coeffs);
 
+        // Finally, calculate the reminder to get the check codes
         let rem = poly % &generator;
         rem.into_coeffs().take(k).rev().map(|x| x.value())
     }
 
     /// Decode the data payload and fix the possible errors in-place.
+    /// This is using the Gao decoder developed by Shuhong Gao.
     ///
     /// # Arguments
     /// * `msg` - The input payload (received data + received check codes)
     /// * `k` - The number of check codes within the data slice
     pub fn fix_errors(&self, msg: &mut [usize], k: usize) -> Result<(), String> {
-        let coeffs: Vec<GFNum> = msg.iter()
+        let mut coeffs: Vec<GFNum> = msg.iter()
             .map(|&x| self.gf.num(x)).rev().collect();
         let msg_poly = GFPoly::new(&self.gf, &coeffs);
-        let s = self.syndromes(&msg_poly, k);
-        if s.deg() == isize::MIN { // s(X) = 0 <=> no errors
+        let g1 = self.syndromes(&msg_poly, k);
+        if g1.deg() == isize::MIN { // s(X) = 0 <=> no errors
             return Ok(());
         }
-        Err(format!("fix_errors todo!(): {}", s.deg()))
+
+        let zero = self.gf.num(0);
+        coeffs.truncate(k + 1); // reuse the allocated coeffs array
+        coeffs.fill(zero);
+        coeffs[0] = self.gf.num(1);
+
+        for i in 1..=k {
+            coeffs[i] = coeffs[i - 1];
+            let p = self.gf.exp2(self.gf.num(i));
+            for j in (1..i).rev() {
+                coeffs[j] = coeffs[j - 1] + (coeffs[j] * p);
+            }
+            coeffs[0] = coeffs[0] * p;
+        }
+        let g0 = GFPoly::new(&self.gf, &coeffs);
+
+        let g = g0.gcd(&g1);
+        let (_, v) = Self::bezout(&g, &g0, &g1, msg.len() / 2);
+        let (f1, r) = g.clone() / &v;
+        if f1.deg() < k as isize && r.deg() < 0 { // deg(f1) < k && r = 0
+            for (i, x) in f1.iter().rev().enumerate() {
+                msg[i] = x.value();
+            }
+            Ok(())
+        } else {
+            Err("Reed Solomon failed because of too many errors".to_owned())
+        }
     }
 
+    /// Compute the syndromes polynomial. It is used to quickly check if the
+    /// input message is corrupted or not.
     fn syndromes<'a>(&'a self, poly: &'a GFPoly, k: usize) -> GFPoly<'a> {
         let mut coeffs = vec![self.gf.num(0); k];
         for i in 1..=k {
@@ -86,6 +116,12 @@ impl ReedSolomon {
             coeffs[i - 1] = poly.eval(p);
         }
         GFPoly::new(&self.gf, &coeffs)
+    }
+
+    /// Extended Euclidean algorithm
+    fn bezout<'a>(gcd: &'a GFPoly, a: &'a GFPoly, b: &'a GFPoly, l: usize)
+        -> (GFPoly<'a>, GFPoly<'a>) {
+        todo!()
     }
 }
 
@@ -148,7 +184,7 @@ mod tests {
             .collect();
         let rs = ReedSolomon::new(4, 0b10011);
         let inp_poly = GFPoly::from_nums(&rs.gf, &inp);
-        assert_eq!(GFPoly::zero(&rs.gf), rs.syndromes(&inp_poly, 5));
+        assert_eq!(GFPoly::from_nums(&rs.gf, &[]), rs.syndromes(&inp_poly, 5));
     }
 
     #[test]
