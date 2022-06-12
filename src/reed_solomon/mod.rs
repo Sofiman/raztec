@@ -92,11 +92,13 @@ impl ReedSolomon {
             }
             coeffs[0] = coeffs[0] * p;
         }
-        let g0 = GFPoly::new(&self.gf, &coeffs);
+        let g0 = GFPoly::new(&self.gf, &coeffs); // generator polynomial
 
-        let g = g0.gcd(&g1);
-        let (_, v) = Self::bezout(&g, &g0, &g1, msg.len() / 2);
-        let (f1, r) = g.clone() / &v;
+        // g = u(x) * g0(x) + v(x) * g1(x)
+        let deg_limit = (self.gf.order() as usize + k) as isize / 2;
+        let (g, _, v) = Self::p_bezout(&self.gf, &g0, &g1, deg_limit);
+        let (f1, r) = g / &v;
+        println!("=> {} | {}", f1, r);
         if f1.deg() < k as isize && r.deg() < 0 { // deg(f1) < k && r = 0
             for (i, x) in f1.iter().rev().enumerate() {
                 msg[i] = x.value();
@@ -118,10 +120,33 @@ impl ReedSolomon {
         GFPoly::new(&self.gf, &coeffs)
     }
 
-    /// Extended Euclidean algorithm
-    fn bezout<'a>(gcd: &'a GFPoly, a: &'a GFPoly, b: &'a GFPoly, l: usize)
-        -> (GFPoly<'a>, GFPoly<'a>) {
-        todo!()
+    /// [Partial] Extended Euclidean algorithm. Outputs (g, u, v) to satisfy
+    /// Bezout's identity: au + bv = g
+    pub fn p_bezout<'a>(gf: &'a GF, a: &'a GFPoly, b: &'a GFPoly, limit: isize)
+        -> (GFPoly<'a>, GFPoly<'a>, GFPoly<'a>) {
+        let (mut r0, mut r1) = (a.clone(), b.clone());
+        let (mut s0, mut s1) = (GFPoly::from_nums(gf, &[1]), GFPoly::zero(gf));
+
+        while r1.deg() >= 0 {
+            let (q, _) = r0.clone() / &r1;
+
+            let r2 = r0;
+            r0 = r1;
+            r1 = r2 - q.clone() * r0.clone();
+
+            let s2 = s0;
+            s0 = s1;
+            s1 = s2 - q.clone() * s0.clone();
+        }
+
+        let t = if b.deg() < 0 {
+            GFPoly::zero(gf)
+        } else {
+            let (q, _) = (r0.clone() - s0.clone() * a.clone()) / b;
+            q
+        };
+
+        (r0, s0, t)
     }
 }
 
@@ -130,7 +155,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_check_codes_zero(){
+    fn test_rs_generate_check_codes_zero(){
         let rs = ReedSolomon::new(4, 0b10011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0, 0], 3).collect();
@@ -138,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_check_codes(){
+    fn test_rs_generate_check_codes(){
         let rs = ReedSolomon::new(4, 0b10011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0, 0b1001], 5).collect();
@@ -146,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_check_codes2(){
+    fn test_rs_generate_check_codes2(){
         let rs = ReedSolomon::new(4, 0b10011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0, 0b0100], 5).collect();
@@ -154,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_check_codes3(){
+    fn test_rs_generate_check_codes3(){
         let rs = ReedSolomon::new(4, 0b10011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0b0101, 0b1010], 5).collect();
@@ -162,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_check_codes4(){
+    fn test_rs_generate_check_codes4(){
         let rs = ReedSolomon::new(4, 0b10011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[0b1111, 0b0000], 5).collect();
@@ -170,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_check_big(){
+    fn test_rs_generate_check_big(){
         let rs = ReedSolomon::new(6, 0b1000011);
         let check_codes: Vec<usize> = rs
             .generate_check_codes(&[39, 50, 1, 28, 7, 2, 42, 40, 37, 15], 7)
@@ -179,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_syndromes_with_valid_code(){
+    fn test_rs_syndromes_with_valid_code(){
         let inp: Vec<usize> = [0, 0b1001, 12, 2, 3, 1, 9].into_iter().rev()
             .collect();
         let rs = ReedSolomon::new(4, 0b10011);
@@ -188,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_syndromes_with_corrupted_code(){
+    fn test_rs_syndromes_with_corrupted_code(){
         // original: [15, 0, 7, 8, 7, 9, 3]
         // corrupted: [8, 10, 7, 8, 7, 9, 3]
         let inp = [0b1000, 0b1010, 0b0111, 0b1000, 0b0111, 0b1001, 0b0011]
@@ -200,11 +225,46 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_errors(){
-        let mut inp = [0b0101, 0b1101, 0b0111, 0b1001, 0b0101, 0b0000, 0b1011];
-        let     exp = [0b0101, 0b1010, 0b1110, 0b0111, 0b0101, 0b0000, 0b1011];
+    fn test_rs_p_bezout(){
         let rs = ReedSolomon::new(4, 0b10011);
-        //rs.fix_errors(&mut inp, 2).unwrap();
-        //assert_eq!(inp, exp);
+        let a = GFPoly::from_nums(&rs.gf, &[1, 3, 5, 6, 1]);
+        let b = GFPoly::from_nums(&rs.gf, &[1, 4, 0, 1, 8]);
+        let (d, u, v) = ReedSolomon::p_bezout(&rs.gf, &a, &b, 0);
+        assert_eq!(a.clone() * u + b.clone() * v, d);
+        assert_eq!(a.gcd(&b), d);
+    }
+
+    #[test]
+    fn test_rs_p_bezout2(){
+        let rs = ReedSolomon::new(8, 0x171);
+        let a = GFPoly::from_nums(&rs.gf, &[11, 3, 8, 7, 15, 1]);
+        let b = GFPoly::from_nums(&rs.gf, &[2, 1, 0, 5, 0, 1, 7, 1, 1, 1]);
+        let exp =  (GFPoly::from_nums(&rs.gf, &[29]),
+                    GFPoly::from_nums(&rs.gf, &[167, 120, 116, 115, 186, 81, 231, 228, 121]),
+                    GFPoly::from_nums(&rs.gf, &[132, 219, 0, 216, 121]));
+        let (d, u, v) = ReedSolomon::p_bezout(&rs.gf, &a, &b, 0);
+        assert_eq!(a.clone() * u.clone() + b.clone() * v.clone(), d);
+        assert_eq!((d, u, v), exp);
+    }
+
+    #[test]
+    fn test_rs_p_bezout3(){
+        // https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm#Example_2
+        let rs = ReedSolomon::new(8, 0x171);
+        let a = GFPoly::from_nums(&rs.gf, &[1, 1, 0, 1, 1, 0, 0, 0, 1]);
+        let b = GFPoly::from_nums(&rs.gf, &[1, 1, 0, 0, 1, 0, 1]);
+        let exp =  (GFPoly::from_nums(&rs.gf, &[1]),
+                    GFPoly::from_nums(&rs.gf, &[1, 0, 1, 1, 1, 1]),
+                    GFPoly::from_nums(&rs.gf, &[0, 1, 0, 1, 0, 0, 1, 1]));
+        assert_eq!(ReedSolomon::p_bezout(&rs.gf, &a, &b, 0), exp);
+    }
+
+    #[test]
+    fn test_rs_fix_errors(){
+        let mut inp = [0b0101, 0b1101, 0b0111, 0b1001, 0b0101, 0b0000, 0b1011];
+        let     exp = [0b0101, 0b1010, 0b0111, 0b0111, 0b0101, 0b0000, 0b1011];
+        let rs = ReedSolomon::new(4, 0b10011);
+        rs.fix_errors(&mut inp, 5).unwrap();
+        assert_eq!(inp, exp);
     }
 }
