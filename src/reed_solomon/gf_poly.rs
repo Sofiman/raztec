@@ -21,6 +21,12 @@ impl<'a> GFPoly<'a> {
         poly
     }
 
+    pub fn from_vec(gf: &'a GF, coeffs: Vec<GFNum<'a>>) -> Self {
+        let mut poly = Self { zero: gf.num(0), coeffs, deg: 0 };
+        poly.update_deg();
+        poly
+    }
+
     pub fn from_nums(gf: &'a GF, coeffs: &[usize]) -> Self {
         let coeffs: Vec<GFNum> = coeffs.iter()
             .map(|&x| gf.num(x)).collect();
@@ -247,18 +253,17 @@ impl<'a> ShlAssign<usize> for GFPoly<'a> {
 }
 
 impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
-    type Output = (GFPoly<'a>, GFPoly<'a>);
+    type Output = GFPoly<'a>;
 
-    fn div(self, rhs: &Self) -> (Self, Self) {
+    fn div(self, rhs: &Self) -> Self {
         let deg_d = rhs.deg();
         if deg_d < 0 {
             panic!("GFPoly division by zero");
         }
         let mut deg_r = self.deg();
         if deg_r < deg_d {
-            let zero = GFPoly { zero: self.zero,
+            return GFPoly { zero: self.zero,
                 coeffs: vec![], deg: isize::MIN };
-            return (zero, self);
         }
 
         let mut r = self;
@@ -289,13 +294,7 @@ impl<'a> Div<&GFPoly<'a>> for GFPoly<'a> {
             }
         }
 
-        while deg_r >= 0 && r.coeffs[deg_r as usize] == r.zero {
-            deg_r -= 1;
-        }
-        r.deg = if deg_r < 0 { isize::MIN } else { deg_r };
-        let q = GFPoly { zero: r.zero, coeffs: q, deg: q_len as isize - 1 };
-
-        (q, r)
+        GFPoly { zero: r.zero, coeffs: q, deg: q_len as isize - 1 }
     }
 }
 
@@ -588,8 +587,7 @@ mod tests {
         let gf: GF = GF::new(4, 0b10011);
         let a = GFPoly::from_nums(&gf, &[4, 1]);
         let b = GFPoly::from_nums(&gf, &[12, 14, 6]);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[]),
-                            GFPoly::from_nums(&gf, &[4, 1])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[]));
     }
 
     #[test]
@@ -597,8 +595,7 @@ mod tests {
         let gf: GF = GF::new(4, 0b10011);
         let a = GFPoly::from_nums(&gf, &[12, 14, 6]);
         let b = GFPoly::from_nums(&gf, &[4, 1]);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[5, 6]),
-                            GFPoly::from_nums(&gf, &[11])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[5, 6]));
     }
 
     #[test]
@@ -606,8 +603,7 @@ mod tests {
         let gf: GF = GF::new(4, 0b10011);
         let a = GFPoly::from_nums(&gf, &[2, 3, 3, 6, 9, 4]);
         let b = GFPoly::from_nums(&gf, &[9, 7, 0, 1]);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[9, 9, 4]),
-                            GFPoly::from_nums(&gf, &[15, 4, 11])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[9, 9, 4]));
     }
 
     #[test]
@@ -615,8 +611,7 @@ mod tests {
         let gf: GF = GF::new(4, 0b10011);
         let a = GFPoly::from_nums(&gf, &[4, 3, 3, 7, 1, 2, 6, 1]);
         let b = GFPoly::from_nums(&gf, &[1, 0, 0, 3, 1]);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[5, 13, 5, 1]),
-                            GFPoly::from_nums(&gf, &[1, 14, 6, 9])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[5, 13, 5, 1]));
     }
 
     #[test]
@@ -624,8 +619,7 @@ mod tests {
         let gf: GF = GF::new(4, 0b10011);
         let b = GFPoly::from_nums(&gf, &[4, 7, 11, 9]);
         let a = b.clone() * gf.num(2);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[2]),
-                            GFPoly::from_nums(&gf, &[])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[2]));
     }
 
     #[test]
@@ -634,8 +628,7 @@ mod tests {
         let gf: GF = GF::new(8, 0x171);
         let a = GFPoly::from_nums(&gf, &[11, 0, 8, 7, 15, 1]);
         let b = GFPoly::from_nums(&gf, &[1, 0, 8, 9]);
-        assert_eq!(a / &b, (GFPoly::from_nums(&gf, &[165, 237, 173]),
-                            GFPoly::from_nums(&gf, &[174, 237, 73])));
+        assert_eq!(a / &b, GFPoly::from_nums(&gf, &[165, 237, 173]));
     }
 
     #[test]
