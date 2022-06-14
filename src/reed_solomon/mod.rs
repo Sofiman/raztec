@@ -70,29 +70,44 @@ impl ReedSolomon {
     ///
     /// # Arguments
     /// * `msg` - The input payload (received data + received check codes)
-    /// * `k` - The number of check codes within the data slice
-    pub fn fix_errors(&self, msg: &mut [usize], k: usize) -> Result<(), String> {
+    /// * `t` - The number of check codes within the data slice
+    pub fn fix_errors(&self, msg: &mut [usize], t: usize) -> Result<(), String> {
         let mut coeffs: Vec<GFNum> = msg.iter()
             .map(|&x| self.gf.num(x)).rev().collect();
         let msg_poly = GFPoly::from_vec(&self.gf, coeffs);
-        let s = self.syndromes(&msg_poly, k);
+        println!("R(x): {}", msg_poly);
+        let s = self.syndromes(&msg_poly, t);
         if s.deg() == isize::MIN { // S(X) = 0 <=> no errors
             return Ok(());
         }
+        println!("S(x): {}", s);
 
-        // Precompute x^k
-        let (zero, one) = (self.gf.num(0), self.gf.num(1));
-        coeffs = vec![zero; k + 1];
-        coeffs[k] = one;
-        let xk = GFPoly::from_vec(&self.gf, coeffs);
+        // Precompute x^t
+        coeffs = vec![self.gf.num(0); t + 1];
+        coeffs[t] = self.gf.num(1);
+        let xt = GFPoly::from_vec(&self.gf, coeffs);
 
         // Apply the Extended Euclidean algorithm until r has a degree < t/2
-        let (e_loc, e_mag) = Self::e_gcd(&self.gf, k as isize, &xk, s.clone());
+        let (mut lambda, omega) = Self::e_gcd(&self.gf, t as isize / 2, xt, s)?;
+        println!("Λ(x) = {}", lambda);
+        println!("Ω(x) = {}", omega);
+        let err_locs = Self::find_error_roots(&self.gf, &lambda)?;
+        println!("locations: {:?}", err_locs);
+        let err_mags = Self::find_error_vals(&self.gf,
+            &mut lambda, &omega, &err_locs);
+        println!("magnitudes: {:?}", err_mags);
 
-        // Forney algorithm
-        let e_eval = (s / &e_loc) % &xk;
+        let l = msg.len();
+        for (&loc, &mag) in err_locs.iter().zip(err_mags.iter()) {
+            let pos = self.gf.log2(loc).value() - 1;
+            println!("(*) log({}) = {}", loc, pos);
+            if pos > l {
+                return Err("Invalid error locations".to_owned());
+            }
+            msg[l - 1 - pos] = (msg_poly[pos] + mag).value();
+        }
 
-        todo!()
+        Ok(())
     }
 
     /// Compute the syndromes polynomial. It is used to quickly check if the
@@ -108,12 +123,11 @@ impl ReedSolomon {
 
     /// Extended Euclidean algorithm adapted by Sugiyama.
     /// Outputs (error locator, error magnitudes) polynomials.
-    fn e_gcd<'a>(gf: &'a GF, mut t: isize, xk: &'a GFPoly, s: GFPoly<'a>)
-        -> (GFPoly<'a>, GFPoly<'a>) {
-        let (mut old_r, mut r) = (xk.clone(), s); // x^k
+    fn e_gcd<'a>(gf: &'a GF, t: isize, xt: GFPoly<'a>, s: GFPoly<'a>)
+        -> Result<(GFPoly<'a>, GFPoly<'a>), String> {
+        let (mut old_r, mut r) = (xt, s); // x^k
         let (mut old_a, mut a) = (GFPoly::zero(gf),GFPoly::from_nums(gf,&[1]));
 
-        t /= 2;
         while r.deg() >= t {
             let q = old_r.clone() / &r;
 
@@ -121,20 +135,63 @@ impl ReedSolomon {
             old_r = r;
             r = r2 - q.clone() * old_r.clone();
 
-            let s2 = old_a;
+            let a2 = old_a;
             old_a = a;
-            a = s2 - q.clone() * old_a.clone();
+            a = a2 - q.clone() * old_a.clone();
+        }
+        let coef = a[0];
+        if coef.value() == 0 {
+            return Err("EEA failed".to_owned());
         }
 
         // divide both a and r by the low order term of a to satisfy a[0] = 1
-        let coef = a[0].inv();
-        (a * coef, r * coef) // (error_locator, error_magnitudes)
+        let coef = coef.inv();
+        Ok((a * coef, r * coef)) // (error_locator, error_magnitudes)
+    }
+
+    /// Chien's search algorithm
+    fn find_error_roots<'a>(gf: &'a GF, e_loc: &GFPoly<'a>)
+        -> Result<Vec<GFNum<'a>>, String> {
+        let nb_err = e_loc.deg();
+        if nb_err < 0 {
+            return Err("Invalid number of errors".to_owned());
+        }
+        let nb_err = nb_err as usize;
+        let mut roots = Vec::with_capacity(nb_err);
+        let (mut i, l) = (1, gf.size());
+        while i < l && roots.len() < nb_err {
+            let n = gf.num(i);
+            if e_loc.eval(n).value() == 0 {
+                roots.push(n.inv());
+            }
+            i += 1;
+        }
+        if roots.len() != nb_err {
+            Err("Invalid error locator (Too many errors?)".to_owned())
+        } else {
+            Ok(roots)
+        }
+
+    }
+
+    /// Forney's algorithm
+    fn find_error_vals<'a>(gf: &'a GF, sigma: &'a mut GFPoly<'a>,
+        omega: &'a GFPoly<'a>, err_locs: &[GFNum<'a>]) -> Vec<GFNum<'a>> {
+        // Calculate Λ'(x) in GF
+        GFPoly::fm_derive(sigma, gf);
+
+        err_locs.iter().map(|x| {
+            let xi = x.inv();
+            omega.eval(xi) / sigma.eval(xi)
+        }).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{Rng, thread_rng};
+    use rand::distributions::Uniform;
 
     #[test]
     fn test_rs_generate_check_codes_zero(){
@@ -208,10 +265,52 @@ mod tests {
 
     #[test]
     fn test_rs_fix_errors(){
-        let mut inp = [0b0101, 0b1101, 0b0111, 0b1001, 0b0101, 0b0000, 0b1011];
-        let     exp = [0b0101, 0b1010, 0b0111, 0b0111, 0b0101, 0b0000, 0b1011];
+        let mut inp = [0b1000, 0b0000, 0b0111, 0b1000, 0b0111, 0b1001, 0b0011];
+        let     exp = [0b1111, 0b0000, 0b0111, 0b1000, 0b0111, 0b1001, 0b0011];
         let rs = ReedSolomon::new(4, 0b10011);
         rs.fix_errors(&mut inp, 5).unwrap();
         assert_eq!(inp, exp);
+    }
+
+    #[test]
+    fn test_rs_fix_errors2(){
+        let mut inp = [0b1101, 0b1000, 0b1010, 0b0011, 0b1011, 0b1000, 0b0100];
+        let     exp = [0b0000, 0b0100, 0b1010, 0b0011, 0b1011, 0b1000, 0b0100];
+        let rs = ReedSolomon::new(4, 0b10011);
+        rs.fix_errors(&mut inp, 5).unwrap();
+        assert_eq!(inp, exp);
+    }
+
+    #[test]
+    fn test_rs_fix_errors_big(){
+        let rs = ReedSolomon::new(6, 0b1000011);
+        let mut inp = [39, 50, 1, 28, 7, 2, 42, 30, 14, 25, 44, 29, 43, 52, 49, 22, 15];
+        let     exp = [39, 50, 1, 28, 7, 2, 42, 40, 37, 15, 44, 29, 43, 52, 49, 22, 15];
+        rs.fix_errors(&mut inp, 7).unwrap();
+        assert_eq!(inp, exp);
+    }
+
+    #[test]
+    fn test_rs_mixed(){
+        let mut rng = thread_rng();
+        let n = rng.gen_range(20..=40);
+        let nb_err = rng.gen_range(2..=10);
+        let mut data: Vec<usize> = (&mut rng).sample_iter(Uniform::new(0, 256))
+            .take(n).collect();
+        println!("Generated data: {:?}", data);
+
+        let rs = ReedSolomon::new(8, 0x171);
+        data.extend(rs.generate_check_codes(&data, nb_err*2));
+        let original = data.clone();
+        let l = data.len();
+
+        println!("Corrupting {} values", nb_err);
+        for _ in 0..nb_err {
+            data[rng.gen_range(0..l)] = rng.gen_range(0..256);
+        }
+        println!("Corrupted data: {:?}", data);
+
+        rs.fix_errors(&mut data, nb_err*2).unwrap();
+        assert_eq!(data, original);
     }
 }

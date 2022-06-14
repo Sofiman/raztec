@@ -105,6 +105,15 @@ impl GF {
         let i = self.size - self.log_table[x.val];
         GFNum { val: self.exp_table[i], gf: self }
     }
+
+    /// Ordinary multiplication in GF(2^m)
+    pub fn rep_add<'a>(&'a self, k: usize, x: GFNum<'a>) -> GFNum<'a> {
+        if k % 2 == 0 {
+            GFNum { val: 0, gf: self }
+        } else {
+            x
+        }
+    }
 }
 
 impl PartialEq for GF {

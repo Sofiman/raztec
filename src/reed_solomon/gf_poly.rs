@@ -81,6 +81,21 @@ impl<'a> GFPoly<'a> {
         }
         a
     }
+
+    /// Calculates the formal derivative of x
+    pub fn fm_derive<'b>(p: &mut GFPoly<'b>, gf: &'b GF) {
+        let d = p.deg();
+        if p.deg() < 0 {
+            return;
+        }
+        let d = d as usize;
+
+        for i in 1..=d {
+            p.coeffs[i - 1] = gf.rep_add(i, p.coeffs[i]);
+        }
+        p.coeffs[d] = gf.num(0);
+        p.deg -= 1;
+    }
 }
 
 impl<'a> Index<usize> for GFPoly<'a> {
@@ -677,5 +692,23 @@ mod tests {
         let a = GFPoly::from_nums(&gf, &[1, 5, 0, 2]);
         let b = GFPoly::from_nums(&gf, &[3, 2, 3, 6, 3]);
         assert_eq!(a.gcd(&b), GFPoly::from_nums(&gf, &[11]));
+    }
+
+    #[test]
+    fn test_gf_poly_fm_derivative(){
+        let gf: GF = GF::new(4, 0b10011);
+        let mut a = GFPoly::from_nums(&gf, &[1, 5, 0, 2]); // 1 + 5x + 2x^3
+        GFPoly::fm_derive(&mut a, &gf);
+        assert_eq!(a, GFPoly::from_nums(&gf, &[5, 0, 2]));
+    }
+
+    #[test]
+    fn test_gf_poly_fm_derivative2(){
+        let gf: GF = GF::new(4, 0b10011);
+        // 4 + 3x + 3x^2 + 7x^3 + x^4 + 2x^5 + 6x^6 + x^7
+        // => 3 + 0x + 7x^2 + 0x^3 + 2x^4 + 0x^5 + x^6
+        let mut a = GFPoly::from_nums(&gf, &[4, 3, 3, 7, 1, 2, 6, 1]);
+        GFPoly::fm_derive(&mut a, &gf);
+        assert_eq!(a, GFPoly::from_nums(&gf, &[3, 0, 7, 0, 2, 0, 1]));
     }
 }
