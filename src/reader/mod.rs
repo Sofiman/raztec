@@ -77,7 +77,7 @@ impl Marker {
 
     /// Returns the location of the top left corner of the Marker area. The
     /// location is defined by (col, row) with (col, row) respectivly
-    /// corresponding to the (Y, X) axes of the input image (top left is (0,0)).
+    /// corresponding to the (X, Y) axes of the input image (top left is (0,0)).
     pub fn loc(&self) -> (usize, usize) { self.loc }
 
     /// Returns the size of the Marker area. The size is defined by
@@ -163,7 +163,7 @@ impl ReadAztecCode {
 
     /// Returns the location of the center of the Aztec Code. The
     /// location is defined by (col, row) with (col, row) respectivly
-    /// corresponding to the (Y, X) axes of the input image (top left is (0,0)).
+    /// corresponding to the (X, Y) axes of the input image (top left is (0,0)).
     pub fn location(&self) -> (usize, usize) {
         self.loc
     }
@@ -514,8 +514,10 @@ impl AztecReader {
         }
     }
 
-    /// Runs the Aztec Code finding algorithms and returns an iterator over 
-    /// them. You should call `decode` to decode the Aztec Code candidate.
+    /// Runs the Aztec Code finding algorithms and returns a vector of possible
+    /// Aztec Code candidates (symbols that have a valid bullseye pattern). You
+    /// should call the `decode` function on them. Note that this function is
+    /// quite slow depending on the resolution of the input image.
     pub fn detect_codes(&mut self) -> Vec<AztecCenter> {
         let mut centers = vec![];
         let mut counts = [0; 5];

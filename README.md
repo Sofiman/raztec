@@ -48,4 +48,4 @@ please open an issue so I can look into it.
 ## TODO
 
 - Implement an Aztec code reader
-- Improve speed of big Aztec Code generation
+- Add support for combined Aztec Codes (Structured connection)

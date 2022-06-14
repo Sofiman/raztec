@@ -25,8 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Decoded code in {:?}", start.elapsed());
         match code {
             Ok(code) => {
-                println!("=> Valid {:?} Aztec code at {:?}", code.code_type(),
-                    code.location());
+                println!("=> Valid {:?} Aztec code at {:?} (size: {})",
+                    code.code_type(), code.location(), code.size());
                 //reader.markers.push(code.center().as_marker());
             },
             Err(kind) => println!("=> Invalid code, {}", kind)
