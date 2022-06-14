@@ -15,27 +15,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Finding Aztec Codes...");
     let start = Instant::now();
-    let results = reader.read();
-    println!("Done in {:?}", start.elapsed());
-    for code in results {
+    let candidates = reader.detect_codes();
+    println!("Found {} candidates in {:?}", candidates.len(), start.elapsed());
+    println!("Here is the results:");
+    for candidate in candidates {
+        println!("[Possible code at {}]", candidate.as_marker());
+        let start = Instant::now();
+        let code = reader.decode(candidate);
+        println!("Decoded code in {:?}", start.elapsed());
         match code {
             Ok(code) => {
-                println!("Found {:?} Aztec code at {:?}", code.code_type(),
+                println!("=> Valid {:?} Aztec code at {:?}", code.code_type(),
                     code.location());
-                reader.markers.push(code.center().as_marker());
+                //reader.markers.push(code.center().as_marker());
             },
-            Err(kind) => println!("Found invalid code, {}", kind)
+            Err(kind) => println!("=> Invalid code, {}", kind)
         }
     }
 
     let mut pixels: Vec<u32> = pixels.iter().map(|&x| x <= 104)
         .map(|x| if x { 0 } else { 0xffffff }).collect();
-    for marker in reader.markers.iter() {
-        let (col, row) = marker.loc;
-        let (w, h) = marker.size;
+    for marker in reader.markers() {
+        let (col, row) = marker.loc();
+        let (w, h) = marker.size();
         for i in row..(row+h) {
             for j in col..(col+w) {
-                pixels[i * width as usize + j] = marker.color;
+                pixels[i * width as usize + j] = marker.color();
             }
         }
     }

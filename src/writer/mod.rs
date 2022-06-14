@@ -417,6 +417,38 @@ impl Word {
     }
 }
 
+/// Aztec Code config containing all the different properties of an Aztec Code
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct AztecCodeConfig {
+    layers: usize,
+    bit_cap: usize,
+    words: usize,
+    codewords: usize,
+    codeword_size: usize,
+    check_codes: usize
+}
+
+impl AztecCodeConfig {
+
+    /// Number of layers of the Aztec Code (1-32)
+    pub fn layers(&self) -> usize { self.layers }
+
+    /// Capacity in bits of the Aztec Code including the error check codewords.
+    pub fn total_capacity(&self) -> usize { self.bit_cap }
+
+    /// Number of words appended to the Aztec Code
+    pub fn words(&self) -> usize { self.words }
+
+    /// Number of codewords encoded in the Aztec Code
+    pub fn nb_codewords(&self) -> usize { self.codewords }
+
+    /// Size of a codeword in bits (6-12)
+    pub fn codeword_size(&self) -> usize { self.codeword_size }
+
+    /// Number of error correction codes appended to the end of the Aztec Code
+    pub fn nb_check_codes(&self) -> usize { self.check_codes }
+}
+
 /// Aztec Code generator using the Builder Pattern
 pub struct AztecCodeBuilder {
     current_mode: Mode,
@@ -490,11 +522,21 @@ impl AztecCodeBuilder {
     /// until the `build` function is called. Panics if there is not supported
     /// characters in the string (Characters must be in ASCII-128).
     pub fn append(&mut self, text: &str) -> &mut AztecCodeBuilder {
+        self.try_append(text).unwrap()
+    }
+
+    /// Tries to append text and convert it to the Aztec Code format to the
+    /// future Aztec Code. Note that the size of the final Aztec Code is not
+    /// known until the `build` function is called. Returns an error if there
+    /// is not supported characters in the string (Characters must be in
+    /// ASCII-128).
+    pub fn try_append(&mut self, text: &str)
+        -> Result<&mut AztecCodeBuilder, String> {
         if text.is_empty() {
-            return self;
+            return Ok(self);
         }
         let mut chars = text.chars();
-        let mut prev_word = self.process_char(chars.next().unwrap(), 0);
+        let mut prev_word = self.process_char(chars.next().unwrap(), 0)?;
         for (i, c) in chars.enumerate() {
             prev_word = match (c, prev_word) {
                 // Check for 2-bytes words combinations
@@ -511,14 +553,14 @@ impl AztecCodeBuilder {
                     => (Word::Punc(5),  Mode::Punctuation),
 
                 _ => {
-                    let next = self.process_char(c, i + 1);
+                    let next = self.process_char(c, i + 1)?;
                     self.push_in(prev_word, Some(next));
                     next
                 }
             }
         }
         self.push_in(prev_word, None);
-        self
+        Ok(self)
     }
 
     /// Returns the next state according to the current mode and the modes in
@@ -536,39 +578,39 @@ impl AztecCodeBuilder {
     /// Converts the provided char into its translation in the Aztec code
     /// Character set. This convertion takes into account the current mode of
     /// the builder.
-    fn process_char(&self, c: char, idx: usize) -> (Word, Mode) {
+    fn process_char(&self, c: char, i: usize) -> Result<(Word, Mode), String> {
         match c as u32 {
-            1..=12 => (Word::Mixed(c as u8 + 1), Mode::Mixed),
-            13 => self.poly_word(Mode::Mixed, Word::Mixed(14), // \r
-                                 Mode::Punctuation, Word::Punc(1)),
-            27..=31 => (Word::Mixed(c as u8 - 27 + 15), Mode::Mixed),
+            1..=12 => Ok((Word::Mixed(c as u8 + 1), Mode::Mixed)),
+            13 => Ok(self.poly_word(Mode::Mixed, Word::Mixed(14), // \r
+                                 Mode::Punctuation, Word::Punc(1))),
+            27..=31 => Ok((Word::Mixed(c as u8 - 27 + 15), Mode::Mixed)),
             32 => { // space
                 if self.current_mode != Mode::Punctuation {
-                    (Word::new(self.current_mode, 1), self.current_mode)
+                    Ok((Word::new(self.current_mode, 1), self.current_mode))
                 } else {
-                    (Word::Char(1), Mode::Upper)
+                    Ok((Word::Char(1), Mode::Upper))
                 }
             },
-            44 => self.poly_word(Mode::Digit, Word::Digit(12), // ,
-                                 Mode::Punctuation, Word::Punc(17)),
-            46 => self.poly_word(Mode::Digit, Word::Digit(13), // .
-                                 Mode::Punctuation, Word::Punc(19)),
-            33..=47   => (Word::Punc(c as u8 - 33 + 6), Mode::Punctuation), // ! -> /
-            48..=57   => (Word::digit(c), Mode::Digit),
-            58..=63   => (Word::Punc(c as u8 - 58 + 21), Mode::Punctuation), // : -> ?
-            64        => (Word::Mixed(20), Mode::Mixed), // @
-            65..=90   => (Word::upper_letter(c), Mode::Upper),
-            91        => (Word::Punc(27), Mode::Punctuation), // [
-            92        => (Word::Mixed(21), Mode::Mixed), // \
-            93        => (Word::Punc(28), Mode::Punctuation), // ]
-            94..=96   => (Word::Mixed(c as u8 - 94 + 22), Mode::Mixed), // ^ -> `
-            97..=122  => (Word::lower_letter(c), Mode::Lower),
-            123       => (Word::Punc(29), Mode::Punctuation), // {
-            124       => (Word::Mixed(25), Mode::Mixed), // |
-            125       => (Word::Punc(30), Mode::Punctuation), // } 
-            126..=127 => (Word::Mixed(c as u8 - 100), Mode::Mixed), // ~ -> DEL
+            44 => Ok(self.poly_word(Mode::Digit, Word::Digit(12), // ,
+                                 Mode::Punctuation, Word::Punc(17))),
+            46 => Ok(self.poly_word(Mode::Digit, Word::Digit(13), // .
+                                 Mode::Punctuation, Word::Punc(19))),
+            33..=47   => Ok((Word::Punc(c as u8 - 33 + 6), Mode::Punctuation)), // ! -> /
+            48..=57   => Ok((Word::digit(c), Mode::Digit)),
+            58..=63   => Ok((Word::Punc(c as u8 - 58 + 21), Mode::Punctuation)), // : -> ?
+            64        => Ok((Word::Mixed(20), Mode::Mixed)), // @
+            65..=90   => Ok((Word::upper_letter(c), Mode::Upper)),
+            91        => Ok((Word::Punc(27), Mode::Punctuation)), // [
+            92        => Ok((Word::Mixed(21), Mode::Mixed)), // \
+            93        => Ok((Word::Punc(28), Mode::Punctuation)), // ]
+            94..=96   => Ok((Word::Mixed(c as u8 - 94 + 22), Mode::Mixed)), // ^ -> `
+            97..=122  => Ok((Word::lower_letter(c), Mode::Lower)),
+            123       => Ok((Word::Punc(29), Mode::Punctuation)), // {
+            124       => Ok((Word::Mixed(25), Mode::Mixed)), // |
+            125       => Ok((Word::Punc(30), Mode::Punctuation)), // } 
+            126..=127 => Ok((Word::Mixed(c as u8 - 100), Mode::Mixed)), // ~ -> DEL
             x => panic!("Character not supported `{}` (code: {}) at index {}",
-                c.escape_default(), x, idx)
+                c.escape_default(), x, i)
         }
     }
 
@@ -689,8 +731,10 @@ impl AztecCodeBuilder {
         }
     }
 
-    /// Find the number of layers needed to fit `total_bits` bits
-    fn find_nb_layers(&self, total_bits: usize) -> (usize, usize) {
+    /// Find the number of layers needed to fit `total_bits` bits. Returns
+    /// (layers, total_bits) where total_bits is the total capacity of all the
+    /// layers combined.
+    pub fn find_nb_layers(total_bits: usize) -> (usize, usize) {
         let mut layers = 1;
         let mut nb_bits = (88 + 16 * layers) * layers;
 
@@ -729,6 +773,32 @@ impl AztecCodeBuilder {
         bytes
     }
 
+    /// Simulates the generation of an Aztec Code and returns its final
+    /// configuration. This operation may fail as the build function.
+    pub fn build_config(&self) -> Result<AztecCodeConfig, String> {
+        let mut bitstr = self.to_bit_string();
+
+        let (layers, bits_in_layers) =
+            Self::find_nb_layers(bitstr.len() + bitstr.len() * self.ecr / 100);
+        let codeword_size = match layers {
+             1..=2  =>  6,
+             3..=8  =>  8,
+             9..=22 => 10,
+            23..=32 => 12,
+            _ => return Err(
+                format!("Aztec code with {} layers is not supported", layers))
+        };
+
+        self.bit_stuffing(&mut bitstr, codeword_size);
+        self.add_padding(&mut bitstr, codeword_size);
+
+        let codewords = bitstr.len() / codeword_size;
+        let check_codes = (bits_in_layers - bitstr.len()) / codeword_size;
+
+        Ok(AztecCodeConfig { layers, bit_cap: bits_in_layers, codewords,
+            words: self.words.len(), codeword_size, check_codes })
+    }
+
     /// Generates an AztecCode from the current state of the builder. The state
     /// of the builder can be changed using `append` functions. Returns an
     /// error if the builder's content can not fit in a valid Aztec Code.
@@ -737,7 +807,7 @@ impl AztecCodeBuilder {
 
         // Reed Solomon Config
         let (layers, bits_in_layers) =
-            self.find_nb_layers(bitstr.len() + bitstr.len() * self.ecr / 100);
+            Self::find_nb_layers(bitstr.len() + bitstr.len() * self.ecr / 100);
         let (codeword_size, prim) = match layers {
              1..=2  => ( 6,       0b1000011),
              3..=8  => ( 8,     0b100101101),
