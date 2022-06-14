@@ -6,8 +6,16 @@ use super::{reed_solomon::ReedSolomon, AztecCode};
 #[derive(Debug, Clone)]
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
+    /// The Aztec code located at the marker's position couldn't be read because
+    /// it was rotated or skewed
     BadSymbolOrientation(Marker, String),
+
+    /// The Aztec Code located at the marker's position couldn't be read because
+    /// its format information was corrupted.
     CorruptedFormat(Marker, String),
+
+    /// The Aztec code located at the marker's position couldn't be read because
+    /// its message was corrupted.
     CorruptedMessage(Marker, String),
 }
 
@@ -123,8 +131,10 @@ pub enum AztecCodeType {
 }
 
 pub struct ReadAztecCode {
+    /// Location of the top left corner
     loc: (usize, usize),
-    size: (usize, usize),
+    /// Estimated Aztec code size
+    size: usize,
     center: AztecCenter,
     layers: usize,
     codewords: usize,
@@ -137,7 +147,7 @@ impl ReadAztecCode {
         self.loc
     }
 
-    pub fn size(&self) -> (usize, usize) {
+    pub fn size(&self) -> usize {
         self.size
     }
 
@@ -147,6 +157,15 @@ impl ReadAztecCode {
 
     pub fn code_type(&self) -> AztecCodeType {
         self.code_type
+    }
+}
+
+impl Into<u8> for ReadAztecCode {
+    fn into(self) -> u8 {
+        assert_eq!(self.code_type, AztecCodeType::Rune,
+            "Only an Aztec Rune can be turned into a byte value (cur: {:?})",
+            self.code_type);
+        self.codewords as u8
     }
 }
 
@@ -505,11 +524,11 @@ impl AztecReader {
         let (w2, h2) = (w / 2, h / 2);
         for i in 0..=w {
             for j in 0..=h {
-                let nrow = row + j;
-                let ncol = col + i;
-                if nrow >= h2 && ncol >= w2 && nrow < self.height && ncol < self.width {
-                    self.markers.push(Marker::pink((ncol - h2, nrow - w2), (w, h)));
-                    bal += if self.get_px(nrow - h2, ncol - w2) { 1 } else { -1 };
+                let nr = row + j;
+                let nc = col + i;
+                if nr >= h2         && nc >= w2 &&
+                   nr < self.height && nc < self.width {
+                    bal += if self.get_px(nr - h2, nc - w2) { 1 } else { -1 };
                 }
             }
         }
@@ -657,20 +676,35 @@ impl AztecReader {
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
 
-        if code_type == AztecCodeType::Rune {
-            println!("rune: {}", codewords);
-            return Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
-                code_type, center, layers, codewords })
+        use AztecCodeType::*;
+        match code_type {
+            Rune => Ok(ReadAztecCode { loc: center.loc, size: 11,
+                code_type, center, layers, codewords }),
+            Compact => {
+                println!("{} layers, {} codewords", layers, codewords);
+                let size = 11 + 4 * layers;
+
+                for l in 1..=(layers*2) { // TODO: Read content
+                    self.sample_ring(&center, r + 2.0 * l as f32, sz);
+                }
+
+                Ok(ReadAztecCode { loc: center.loc, size,
+                    code_type, center, layers, codewords })
+            },
+            FullSize => {
+                println!("{} layers, {} codewords", layers, codewords);
+                let raw_size = 15 + 4 * layers;
+                let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
+                let size = raw_size + 2 * anchor_grid;
+
+                for l in 1..=((layers + anchor_grid) * 2) { // TODO: Read content
+                    self.sample_ring(&center, r + 2.0 * l as f32, sz);
+                }
+
+                Ok(ReadAztecCode { loc: center.loc, size,
+                    code_type, center, layers, codewords })
+            }
         }
-
-        println!("{} layers, {} codewords", layers, codewords);
-
-        for l in 1..=(layers*2) { // TODO: Read content
-            self.sample_ring(&center, r + 1.0 + 2.0 * l as f32, sz);
-        }
-
-        Ok(ReadAztecCode { loc: center.loc, size: (sz, sz),
-            code_type, center, layers, codewords })
     }
 
     fn get_px(&self, row: usize, col: usize) -> bool {

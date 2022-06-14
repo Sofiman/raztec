@@ -72,40 +72,38 @@ impl ReedSolomon {
     /// * `msg` - The input payload (received data + received check codes)
     /// * `t` - The number of check codes within the data slice
     pub fn fix_errors(&self, msg: &mut [usize], t: usize) -> Result<(), String> {
+        if msg.is_empty() || t == 0 {
+            return Ok(());
+        }
         let mut coeffs: Vec<GFNum> = msg.iter()
             .map(|&x| self.gf.num(x)).rev().collect();
         let msg_poly = GFPoly::from_vec(&self.gf, coeffs);
-        println!("R(x): {}", msg_poly);
         let s = self.syndromes(&msg_poly, t);
         if s.deg() == isize::MIN { // S(X) = 0 <=> no errors
             return Ok(());
         }
-        println!("S(x): {}", s);
 
-        // Precompute x^t
-        coeffs = vec![self.gf.num(0); t + 1];
+        coeffs = vec![self.gf.num(0); t + 1]; // Precompute x^t
         coeffs[t] = self.gf.num(1);
         let xt = GFPoly::from_vec(&self.gf, coeffs);
 
         // Apply the Extended Euclidean algorithm until r has a degree < t/2
         let (mut lambda, omega) = Self::e_gcd(&self.gf, t as isize / 2, xt, s)?;
-        println!("Λ(x) = {}", lambda);
-        println!("Ω(x) = {}", omega);
+        //println!("Λ(x) = {}", lambda);
+        //println!("Ω(x) = {}", omega);
         let err_locs = Self::find_error_roots(&self.gf, &lambda)?;
-        println!("locations: {:?}", err_locs);
         let err_mags = Self::find_error_vals(&self.gf,
             &mut lambda, &omega, &err_locs);
-        println!("magnitudes: {:?}", err_mags);
 
         let l = msg.len();
         for (&loc, &mag) in err_locs.iter().zip(err_mags.iter()) {
             let pos = self.gf.log2(loc).value() - 1;
-            println!("(*) log({}) = {}", loc, pos);
             if pos > l {
                 return Err("Invalid error locations".to_owned());
             }
             msg[l - 1 - pos] = (msg_poly[pos] + mag).value();
         }
+        println!("Code corrected successfully!");
 
         Ok(())
     }
@@ -122,7 +120,7 @@ impl ReedSolomon {
     }
 
     /// Extended Euclidean algorithm adapted by Sugiyama.
-    /// Outputs (error locator, error magnitudes) polynomials.
+    /// Outputs (error locator, error evaluator) polynomials.
     fn e_gcd<'a>(gf: &'a GF, t: isize, xt: GFPoly<'a>, s: GFPoly<'a>)
         -> Result<(GFPoly<'a>, GFPoly<'a>), String> {
         let (mut old_r, mut r) = (xt, s); // x^k
