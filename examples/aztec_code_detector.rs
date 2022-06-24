@@ -2,7 +2,7 @@ use show_image::{ImageView, ImageInfo, create_window, event};
 use std::time::Instant;
 use std::env;
 
-use raztec::reader::AztecReader;
+use raztec::reader::{AztecReader, Marker};
 
 #[show_image::main]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,8 +18,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let candidates = reader.detect_codes();
     println!("Found {} candidates in {:?}", candidates.len(), start.elapsed());
     println!("Here is the results:");
+    let mut markers = vec![];
     for candidate in candidates {
         println!("[Possible code at {}]", candidate.as_marker());
+        markers.push(candidate.as_marker());
         let start = Instant::now();
         let code = reader.decode(candidate);
         println!("Decoded code in {:?}", start.elapsed());
@@ -35,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut pixels: Vec<u32> = pixels.iter().map(|&x| x <= 104)
         .map(|x| if x { 0 } else { 0xffffff }).collect();
-    for marker in reader.markers() {
+    for marker in reader.markers().iter().chain(markers.iter()) {
         let (col, row) = marker.loc();
         let (w, h) = marker.size();
         for i in row..(row+h) {
