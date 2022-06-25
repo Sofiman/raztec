@@ -41,6 +41,7 @@ impl Display for AztecReadError {
     }
 }
 
+/// Marks a specific feature in an image
 #[derive(Debug, Clone)]
 pub struct Marker {
     color: u32,
@@ -206,22 +207,363 @@ impl Into<String> for ReadAztecCode {
     }
 }
 
-pub struct AztecReader {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Direction {
+    None,
+    Down,
+    Left,
+    Up,
+    Right,
+}
+
+impl Default for Direction {
+    fn default() -> Self {
+        Direction::None
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct Domino {
+    dir: Direction,
+    head_pos: (usize, usize),
+    head: bool,
+    tail: bool,
+    offset: usize
+}
+
+impl Domino {
+
+    fn down(head_pos: (usize, usize)) -> Self {
+        Self { head_pos, dir: Direction::Down,  ..Default::default() }
+    }
+
+    fn left(head_pos: (usize, usize)) -> Self {
+        Self { head_pos, dir: Direction::Left,  ..Default::default() }
+    }
+
+    fn up(head_pos: (usize, usize)) -> Self {
+        Self { head_pos, dir: Direction::Up,    ..Default::default() }
+    }
+
+    fn right(head_pos: (usize, usize)) -> Self {
+        Self { head_pos, dir: Direction::Right, ..Default::default() }
+    }
+
+    fn head(&self) -> (usize, usize) {
+        self.head_pos
+    }
+
+    fn tail(&self) -> (usize, usize) {
+        let (row, col) = self.head_pos;
+        match &self.dir {
+            Direction::None  => unreachable!("tail() on an empty domino"),
+            Direction::Down  => (row + 1 + self.offset, col),
+            Direction::Left  => (row, col - 1 - self.offset),
+            Direction::Up    => (row - 1 - self.offset, col),
+            Direction::Right => (row, col + 1 + self.offset)
+        }
+    }
+
+    fn check_splitting(&mut self, middle: usize) -> usize {
+        let (x, y) = self.tail();
+        if x % 16 == middle || y % 16 == middle {
+            self.offset += 1;
+        }
+        self.offset
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Mode {
+    Upper,
+    Lower,
+    Mixed,
+    Punctuation,
+    Digit
+}
+
+impl Mode {
+    fn capacity(&self) -> usize {
+        match self {
+            Mode::Digit => 4,
+            _ => 5
+        }
+    }
+}
+
+struct AztecReader {
+    size: usize,
+    layers: usize,
+    compact: bool,
+    dominos: Vec<Domino>,
+    codewords: usize,
+}
+
+impl AztecReader {
+    fn new(codewords: usize, layers: usize) -> Self {
+        let compact = layers <= 4;
+        let bullseye_size = if compact { 11 } else { 15 };
+        let raw_size = layers * 4 + bullseye_size;
+        let size = if compact {
+            raw_size
+        } else {
+            raw_size + 2 * (((raw_size - 1) / 2 - 1) / 15)
+        };
+        // Compute the expected number of dominos in the final Aztec Code
+        let len = (raw_size * raw_size - bullseye_size * bullseye_size) / 2;
+        let mut dominos = vec![Domino::default(); len];
+
+        if compact {
+            let mut idx = 0;
+            for layer in 0..layers {
+                let start = 2 * layer;
+                let end = size - start - 1;
+                let limit = end - start - 1;
+
+                for i in 0..limit {
+                    let base = idx + i;
+                    dominos[base          ] = Domino::right((start + i,start));
+                    dominos[base + limit  ] = Domino::up((end, start + i));
+                    dominos[base + limit*2] = Domino::left((end - i, end));
+                    dominos[base + limit*3] = Domino::down((start, end - i));
+                }
+                idx += limit * 4;
+            }
+        } else {
+            let mid = (size / 2) % 16;
+            let mut idx = 0;
+            let mut skips = 0;
+            let mut dpl = (layers - 5) * 4 + 32; // domino per line
+            for layer in 0..layers {
+                let start = 2 * layer;
+                let end = size - start - 1;
+                let mut limit = end - start - 1;
+
+                if (start + skips) % 16 == mid {
+                    skips += 1;
+                }
+
+                let mut delta = 0; // check if any domino will be cut in half
+                if (start + skips + 1) % 16 == mid {
+                    delta = 1;
+                    limit -= 1;
+                }
+
+                let mut j = idx;
+                for offset in 0..(limit - skips * 2) {
+                    if (start + offset + skips) % 16 != mid {
+                        let mut domino = Domino::right(
+                            (start + offset + skips, start + skips));
+                        domino.check_splitting(mid);
+                        dominos[j] = domino;
+
+                        domino = Domino::up(
+                            (end - skips, start + offset + skips));
+                        domino.check_splitting(mid);
+                        dominos[j + dpl] = domino;
+
+                        domino = Domino::left(
+                            (end - offset - skips, end - skips));
+                        domino.check_splitting(mid);
+                        dominos[j + dpl * 2] = domino;
+
+                        domino = Domino::down(
+                            (start + skips, end - offset - skips));
+                        domino.check_splitting(mid);
+                        dominos[j + dpl * 3] = domino;
+                        j += 1;
+                    }
+                }
+                idx += dpl * 4;
+                dpl -= 4;
+                skips += delta;
+            }
+        }
+
+        AztecReader { size, layers, dominos, codewords, compact }
+    }
+
+    fn extract(&mut self, code: AztecCode) {
+        for domino in self.dominos.iter_mut() {
+            if domino.dir == Direction::None {
+                continue;
+            }
+            domino.head = code[domino.head()];
+            domino.tail = code[domino.tail()];
+        }
+    }
+
+    fn as_words(&self, skip: usize, codeword_size: usize) -> Vec<usize> {
+        let dpc = codeword_size / 2; // domino_per_codeword
+        let mut words = Vec::with_capacity(self.dominos.len() / dpc);
+        for codeword in self.dominos[skip..].chunks(dpc) {
+            words.push(codeword.iter().fold(0, |acc, dom| {
+                ((dom.head as usize) << 1) | (dom.tail as usize) | (acc << 2)
+            }))
+        }
+        words
+    }
+
+    fn remove_bitstuffing(bitstr: &mut Vec<bool>, codeword_size: usize) {
+        if bitstr.len() < codeword_size {
+            return;
+        }
+        let mut i = 0;
+        let l = bitstr.len() - codeword_size;
+        let limit = codeword_size - 1;
+        while i < l {
+            let first = bitstr[i];
+            let mut j = 1;
+            while j < limit && bitstr[i + j] == first {
+                j += 1;
+            }
+            if j == limit {
+                bitstr.remove(i + limit);
+            }
+            i += codeword_size;
+        }
+    }
+
+    fn get_word_value(range: &[bool]) -> usize {
+        range.iter().fold(0, |acc, &val| (acc << 1) | (val as usize))
+    }
+
+    fn to_words(bitstr: &[bool]) -> Vec<u8> {
+        let l = bitstr.len();
+        let mut mode = Mode::Upper;
+        let mut shift_mode: Option<Mode> = None;
+        let mut words = vec![];
+
+        let mut i = 0;
+        let mut next_idx = mode.capacity();
+        while next_idx <= l {
+            let word = Self::get_word_value(&bitstr[i..next_idx]);
+            let current_mode = shift_mode.take().unwrap_or(mode);
+            match current_mode {
+                Mode::Upper | Mode::Lower => match word {
+                    0 => shift_mode = Some(Mode::Punctuation),
+                    1 => words.push(b' '),
+                    2..=27 => {
+                        let offset = if current_mode == Mode::Upper {
+                            b'A'
+                        } else {
+                            b'a'
+                        };
+                        words.push(offset + word as u8 - 2);
+                    }
+                    28 => {
+                        if current_mode == Mode::Upper {
+                            mode = Mode::Lower;
+                        } else {
+                            shift_mode = Some(Mode::Upper);
+                        }
+                    },
+                    29 => mode = Mode::Mixed,
+                    30 => mode = Mode::Digit,
+                    31 => todo!("B/S"),
+                    _ => unreachable!("Invalid word {} in {:?} mode",
+                        word, current_mode)
+                },
+                Mode::Mixed => match word {
+                    0 => shift_mode = Some(Mode::Punctuation),
+                    1 => words.push(b' '),
+                    2..=14 => words.push(1 + word as u8 - 2),
+                    15..=19 => words.push(27 + word as u8 - 15),
+                    20..=27 => words.push(
+                        [b'@', b'\\', b'^', b'_', b'`', b'|', b'~', 127]
+                        [word as usize - 20]
+                    ),
+                    28 => mode = Mode::Lower,
+                    29 => mode = Mode::Upper,
+                    30 => mode = Mode::Punctuation,
+                    31 => todo!("B/S"),
+                    _ => unreachable!("Invalid word {} in Mixed mode", word)
+                },
+                Mode::Punctuation => match word {
+                    0 => todo!("FLG(n)"),
+                    1 => words.push(b'\r'),
+                    2 => words.extend([b'\r', b'\n']),
+                    3 => words.extend([b'.', b' ']),
+                    4 => words.extend([b',', b' ']),
+                    5 => words.extend([b':', b' ']),
+                    6..=20 => words.push(b'!' + word as u8 - 6),
+                    21..=26 => words.push(b':' + word as u8 - 21),
+                    27..=30 => words.push(
+                        [b'[', b']', b'{', b'}']
+                        [word as usize - 27]
+                    ),
+                    31 => mode = Mode::Upper,
+                    _ => unreachable!("Invalid word {} in Punctuation mode",
+                        word)
+                },
+                Mode::Digit => match word {
+                    0 => shift_mode = Some(Mode::Punctuation),
+                    1 => words.push(b' '),
+                    2..=11 => words.push(b'0' + word as u8 - 2),
+                    12 => words.push(b','),
+                    13 => words.push(b'.'),
+                    14 => mode = Mode::Upper,
+                    15 => shift_mode = Some(Mode::Upper),
+                    _ => unreachable!("Invalid word {} in Digit mode", word)
+                }
+            }
+            i = next_idx;
+            next_idx += shift_mode.unwrap_or(mode).capacity();
+        }
+
+        words
+    }
+
+    fn read(self) -> Result<Vec<u8>, String> {
+        let layers = self.layers;
+        let (codeword_size, prim) = match layers {
+             1..=2  => ( 6,       0b1000011),
+             3..=8  => ( 8,     0b100101101),
+             9..=22 => (10,   0b10000001001),
+            23..=32 => (12, 0b1000001101001),
+            _ => unreachable!("Aztec code with {} layers is not supported",
+                layers)
+        };
+        let bits_in_layers =
+            (if self.compact { 88 } else { 112 } + 16 * layers) * layers;
+        let start_align = (bits_in_layers % codeword_size) / 2;
+
+        let mut words = self.as_words(start_align, codeword_size);
+        let rs = ReedSolomon::new(codeword_size as u8, prim);
+
+        let check_words = (bits_in_layers / codeword_size) - self.codewords;
+        rs.fix_errors(&mut words, check_words)?;
+
+        let mut bitstr = Vec::with_capacity(self.codewords * codeword_size);
+        for byte in words[..self.codewords].iter() {
+            bitstr.extend((0..codeword_size).rev()
+                .map(|bit| ((byte >> bit) & 1) == 1));
+        }
+        Self::remove_bitstuffing(&mut bitstr, codeword_size);
+        println!("{:?}", bitstr.iter().map(|&x| (48 + x as u8) as char)
+            .collect::<String>());
+        Ok(Self::to_words(&bitstr))
+    }
+
+}
+
+/// Detect and Decode all types of Aztec Codes in images
+pub struct AztecCodeDetector {
     width: usize,
     height: usize,
     image: Vec<bool>,
     markers: Vec<Marker>
 }
 
-impl AztecReader {
+impl AztecCodeDetector {
 
     /// Create a new AztecReader struct from a grayscale image
     /// 
     /// # Arguments
     /// * (`w`, `h`): The width and height of the grayscale image
     /// * `mono`: The grayscale pixel array (8 bits)
-    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecReader {
-        AztecReader { 
+    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector {
+        AztecCodeDetector {
             width: w as usize, height: h as usize,
             image: mono.iter().map(|&x| x < 104).collect(),
             markers: vec![]
@@ -658,7 +1000,7 @@ impl AztecReader {
             // indexes: 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
             // skips:   v _ _ _ _ _ _ _ v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v  v  v  _  _  _  _  _  _  _  v v
 
-            if let Ok(_) = rs.fix_errors(&mut msg, 5) {
+            if rs.fix_errors(&mut msg, 5).is_ok() {
                 let layers = msg[0] >> 2;
                 let codewords = ((msg[0] & 0b11) << 4) | msg[1];
                 Ok((layers + 1, codewords + 1))
@@ -673,10 +1015,6 @@ impl AztecReader {
                 Ok((0, (msg[0] << 4) | msg[1]))
             }
         }
-    }
-    
-    fn unpack_layer(&self, layer: Vec<bool>, data: &mut [usize], written: &mut usize) {
-
     }
 
     /// Tries to decode an Aztec Code candidate (AztecCenter) and retrive all
@@ -701,20 +1039,42 @@ impl AztecReader {
             &overhead_message)?;
 
         use AztecCodeType::*;
+        let mk = center.as_marker();
         match code_type {
             Rune => Ok(ReadAztecCode { loc: center.loc, size: 11,
                 code_type, center, layers, codewords }),
             Compact => {
                 println!("{} layers, {} codewords", layers, codewords);
                 let size = 11 + 4 * layers;
-                let mut data = vec![0usize; codewords];
-                let mut written = 0;
 
+                let mut copy = AztecCode::new(true, size);
+                let mid = size / 2;
                 for l in 1..=(layers*2) { // TODO: Read content
-                    let layer =
+                    let ring =
                         self.sample_ring(&center, r + 2.0 * l as f32, sz);
-                    self.unpack_layer(layer, &mut data, &mut written);
+                    let side = ring.len() / 4;
+                    for cursor in 0..side {
+                        copy[(mid - 5 - l, mid - 4 + cursor - l)] =
+                            ring[cursor];
+
+                        copy[(mid - 4 + cursor - l, mid + 5 + l)] =
+                            ring[cursor + side];
+
+                        copy[(mid + 5 + l, mid - 5 + cursor - l)] =
+                            ring[3 * side - 1 - cursor];
+
+                        copy[(mid - 5 + cursor - l, mid - 5 - l)] =
+                            ring[4 * side - 1 - cursor];
+                    }
                 }
+
+                println!("{}", copy);
+                let mut rd = AztecReader::new(codewords, layers);
+                rd.extract(copy);
+                let val = rd.read()
+                    .map_err(|msg| AztecReadError::CorruptedMessage(mk, msg))?;
+                println!("read val: {}", std::str::from_utf8(&val)
+                    .unwrap_or(&format!("{:?}", val)));
 
                 Ok(ReadAztecCode { loc: center.loc, size,
                     code_type, center, layers, codewords })
@@ -725,9 +1085,27 @@ impl AztecReader {
                 let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
                 let size = raw_size + 2 * anchor_grid;
 
+                let mut copy = AztecCode::new(true, size);
+                let mid = size / 2;
                 for l in 1..=((layers + anchor_grid) * 2) { // TODO: Read content
-                    self.sample_ring(&center, r + 2.0 * l as f32, sz);
+                    let ring =
+                        self.sample_ring(&center, r + 2.0 * l as f32, sz);
+                    let side = ring.len() / 4;
+                    for cursor in 0..side {
+                        copy[(mid - 7 - l, mid - 6 + cursor - l)] =
+                            ring[cursor];
+
+                        copy[(mid - 6 + cursor - l, mid + 7 + l)] =
+                            ring[cursor + side];
+
+                        copy[(mid + 7 + l, mid - 7 + cursor - l)] =
+                            ring[3 * side - 1 - cursor];
+
+                        copy[(mid - 7 + cursor - l, mid - 7 - l)] =
+                            ring[4 * side - 1 - cursor];
+                    }
                 }
+                println!("{}", copy);
 
                 Ok(ReadAztecCode { loc: center.loc, size,
                     code_type, center, layers, codewords })

@@ -3,9 +3,8 @@
 //! A library for generating and scanning Aztec 2D Barcodes using no third
 //! party dependency.
 
-#![warn(missing_docs)]
+//#![warn(missing_docs)]
 pub mod writer;
-#[allow(warnings)] // TODO: Remove me when reader is operational
 pub mod reader;
 pub mod reed_solomon;
 
