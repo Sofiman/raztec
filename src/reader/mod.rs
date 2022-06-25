@@ -163,7 +163,8 @@ pub struct ReadAztecCode {
     center: AztecCenter,
     layers: usize,
     codewords: usize,
-    code_type: AztecCodeType
+    code_type: AztecCodeType,
+    data: Vec<u8>
 }
 
 impl ReadAztecCode {
@@ -190,20 +191,25 @@ impl ReadAztecCode {
     pub fn code_type(&self) -> AztecCodeType {
         self.code_type
     }
-}
 
-impl Into<u8> for ReadAztecCode {
-    fn into(self) -> u8 {
-        assert_eq!(self.code_type, AztecCodeType::Rune,
-            "Only an Aztec Rune can be turned into a byte value (cur: {:?})",
-            self.code_type);
-        self.codewords as u8
+    /// Returns the number of layers of the Aetc Code
+    pub fn layers(&self) -> usize {
+        self.layers
     }
-}
 
-impl Into<String> for ReadAztecCode {
-    fn into(self) -> String {
-        todo!("Implement into string")
+    /// Returns the number of codewords stored in the read Aztec Code
+    pub fn codewords(&self) -> usize {
+        self.codewords
+    }
+
+    /// Returns the data held by the read Aztec Code
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Consumes the ReadAztecCode and returns its data
+    pub fn into_data(self) -> Vec<u8> {
+        self.data
     }
 }
 
@@ -431,7 +437,7 @@ impl AztecReader {
     fn to_words(bitstr: &[bool]) -> Vec<u8> {
         let l = bitstr.len();
         let mut mode = Mode::Upper;
-        let mut shift_mode: Option<Mode> = None;
+        let mut shift_mode = None;
         let mut words = vec![];
 
         let mut i = 0;
@@ -540,8 +546,6 @@ impl AztecReader {
                 .map(|bit| ((byte >> bit) & 1) == 1));
         }
         Self::remove_bitstuffing(&mut bitstr, codeword_size);
-        println!("{:?}", bitstr.iter().map(|&x| (48 + x as u8) as char)
-            .collect::<String>());
         Ok(Self::to_words(&bitstr))
     }
 
@@ -945,11 +949,11 @@ impl AztecCodeDetector {
     fn get_aztec_metadata(&self, mk: Marker, code_type: &mut AztecCodeType,
         message: &[bool]) -> Result<(usize, usize), AztecReadError> {
 
-        let (len, block_size, count) =
+        let (len, block_size, count, mut corner) =
             if *code_type == AztecCodeType::FullSize {
-                (56, 5u8, 10)
+                (56, 5u8, 10, Some(false))
             } else {
-                (40, 7u8, 7)
+                (40, 7u8, 7, None)
             };
 
         if message.len() != len {
@@ -959,17 +963,17 @@ impl AztecCodeDetector {
         let mut codeword = 0;
         let mut codeword_size = 0u8;
         let mut block = 0;
-        let mut corner = true;
         let mut msg = vec![0; count];
         let mut i = 1;
         let mut j = 0;
         while i < len {
             if block == block_size {
-                i += if corner { 3 } else { 1 };
+                i += match corner {
+                    None | Some(true) => 3,
+                    _ => 1
+                };
                 block = 0;
-                if *code_type == AztecCodeType::FullSize {
-                    corner = !corner;
-                }
+                corner = corner.map(|x| !x);
             } else {
                 if codeword_size == 4 {
                     msg[j] = codeword;
@@ -1038,79 +1042,48 @@ impl AztecCodeDetector {
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
 
-        use AztecCodeType::*;
-        let mk = center.as_marker();
-        match code_type {
-            Rune => Ok(ReadAztecCode { loc: center.loc, size: 11,
-                code_type, center, layers, codewords }),
-            Compact => {
-                println!("{} layers, {} codewords", layers, codewords);
-                let size = 11 + 4 * layers;
+        if code_type == AztecCodeType::Rune {
+            return Ok(ReadAztecCode { loc: center.loc, size: 11, code_type,
+                data: vec![codewords as u8], center, codewords: 1, layers: 0 });
+        }
 
-                let mut copy = AztecCode::new(true, size);
-                let mid = size / 2;
-                for l in 1..=(layers*2) { // TODO: Read content
-                    let ring =
-                        self.sample_ring(&center, r + 2.0 * l as f32, sz);
-                    let side = ring.len() / 4;
-                    for cursor in 0..side {
-                        copy[(mid - 5 - l, mid - 4 + cursor - l)] =
-                            ring[cursor];
+        let compact = code_type == AztecCodeType::Compact;
+        let (size, md2, samples) = if compact {
+            (11 + 4 * layers, 5, layers * 2)
+        } else {
+            let raw_size = 15 + 4 * layers;
+            let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
+            let size = raw_size + 2 * anchor_grid;
+            (size, 7, (layers + anchor_grid) * 2)
+        };
 
-                        copy[(mid - 4 + cursor - l, mid + 5 + l)] =
-                            ring[cursor + side];
+        let mut copy = AztecCode::new(compact, size);
+        let mid = size / 2;
+        for l in 1..=samples { // TODO: Read content
+            let ring = self.sample_ring(&center, r + 2.0 * l as f32, sz);
+            let side = ring.len() / 4;
+            for cursor in 0..side {
+                copy[(mid - md2 - l, mid - md2 + 1 + cursor - l)] =
+                    ring[cursor];
 
-                        copy[(mid + 5 + l, mid - 5 + cursor - l)] =
-                            ring[3 * side - 1 - cursor];
+                copy[(mid - md2 + 1 + cursor - l, mid + md2 + l)] =
+                    ring[cursor + side];
 
-                        copy[(mid - 5 + cursor - l, mid - 5 - l)] =
-                            ring[4 * side - 1 - cursor];
-                    }
-                }
+                copy[(mid + md2 + l, mid - md2 + cursor - l)] =
+                    ring[3 * side - 1 - cursor];
 
-                println!("{}", copy);
-                let mut rd = AztecReader::new(codewords, layers);
-                rd.extract(copy);
-                let val = rd.read()
-                    .map_err(|msg| AztecReadError::CorruptedMessage(mk, msg))?;
-                println!("read val: {}", std::str::from_utf8(&val)
-                    .unwrap_or(&format!("{:?}", val)));
-
-                Ok(ReadAztecCode { loc: center.loc, size,
-                    code_type, center, layers, codewords })
-            },
-            FullSize => {
-                println!("{} layers, {} codewords", layers, codewords);
-                let raw_size = 15 + 4 * layers;
-                let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
-                let size = raw_size + 2 * anchor_grid;
-
-                let mut copy = AztecCode::new(true, size);
-                let mid = size / 2;
-                for l in 1..=((layers + anchor_grid) * 2) { // TODO: Read content
-                    let ring =
-                        self.sample_ring(&center, r + 2.0 * l as f32, sz);
-                    let side = ring.len() / 4;
-                    for cursor in 0..side {
-                        copy[(mid - 7 - l, mid - 6 + cursor - l)] =
-                            ring[cursor];
-
-                        copy[(mid - 6 + cursor - l, mid + 7 + l)] =
-                            ring[cursor + side];
-
-                        copy[(mid + 7 + l, mid - 7 + cursor - l)] =
-                            ring[3 * side - 1 - cursor];
-
-                        copy[(mid - 7 + cursor - l, mid - 7 - l)] =
-                            ring[4 * side - 1 - cursor];
-                    }
-                }
-                println!("{}", copy);
-
-                Ok(ReadAztecCode { loc: center.loc, size,
-                    code_type, center, layers, codewords })
+                copy[(mid - md2 + cursor - l, mid - md2 - l)] =
+                    ring[4 * side - 1 - cursor];
             }
         }
+
+        let mut rd = AztecReader::new(codewords, layers);
+        rd.extract(copy);
+        let val = rd.read().map_err(|msg|
+            AztecReadError::CorruptedMessage(center.as_marker(), msg))?;
+
+        Ok(ReadAztecCode { loc: center.loc, size, data: val,
+            code_type, center, layers, codewords })
     }
 
     fn get_px(&self, row: usize, col: usize) -> bool {
