@@ -390,6 +390,8 @@ impl AztecReader {
     }
 
     fn extract(&mut self, code: AztecCode) {
+        assert!(code.size() == self.size,
+            "Attempt to extract a bigger or smaller than expected Aztec Code");
         for domino in self.dominos.iter_mut() {
             if domino.dir == Direction::None {
                 continue;
@@ -415,7 +417,7 @@ impl AztecReader {
             return;
         }
         let mut i = 0;
-        let l = bitstr.len() - codeword_size;
+        let mut l = bitstr.len() - codeword_size;
         let limit = codeword_size - 1;
         while i < l {
             let first = bitstr[i];
@@ -424,9 +426,12 @@ impl AztecReader {
                 j += 1;
             }
             if j == limit {
-                bitstr.remove(i + limit);
+                i += limit;
+                l -= 1;
+                bitstr.remove(i);
+            } else {
+                i += codeword_size;
             }
-            i += codeword_size;
         }
     }
 
@@ -434,16 +439,41 @@ impl AztecReader {
         range.iter().fold(0, |acc, &val| (acc << 1) | (val as usize))
     }
 
-    fn to_words(bitstr: &[bool]) -> Vec<u8> {
+    fn get_bytes(bitstr: &[bool], mut i: usize, data: &mut Vec<u8>) -> usize {
+        if i + 5 >= bitstr.len() {
+            // not enough data for the length of the byte shift sequence so
+            // ignore the B/S word, it is probably end padding ones
+            return i;
+        }
+        let mut len = Self::get_word_value(&bitstr[i..i+5]);
+        i += 5;
+        if len == 0 {
+            if i + 11 >= bitstr.len() {
+                return i; // not enough data for the 11-bit size indicator
+            }
+            len = Self::get_word_value(&bitstr[i..i+11]) + 31;
+            i += 11;
+        }
+        let end = i + len * 8;
+        if end > bitstr.len() {
+            return i; // not enough data for `len` bytes
+        }
+        data.extend(
+            bitstr[i..end].chunks(8).map(|r| Self::get_word_value(r) as u8)
+        );
+        end
+    }
+
+    fn to_words(bitstr: &[bool]) -> Result<Vec<u8>, String> {
         let l = bitstr.len();
         let mut mode = Mode::Upper;
         let mut shift_mode = None;
         let mut words = vec![];
 
         let mut i = 0;
-        let mut next_idx = mode.capacity();
-        while next_idx <= l {
-            let word = Self::get_word_value(&bitstr[i..next_idx]);
+        let mut next = mode.capacity(); // next idx
+        while next <= l {
+            let word = Self::get_word_value(&bitstr[i..next]);
             let current_mode = shift_mode.take().unwrap_or(mode);
             match current_mode {
                 Mode::Upper | Mode::Lower => match word {
@@ -466,9 +496,9 @@ impl AztecReader {
                     },
                     29 => mode = Mode::Mixed,
                     30 => mode = Mode::Digit,
-                    31 => todo!("B/S"),
-                    _ => unreachable!("Invalid word {} in {:?} mode",
-                        word, current_mode)
+                    31 => next = Self::get_bytes(bitstr, next, &mut words),
+                    _ => return Err(format!("Invalid word {} in {:?} mode",
+                        word, current_mode))
                 },
                 Mode::Mixed => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
@@ -482,8 +512,9 @@ impl AztecReader {
                     28 => mode = Mode::Lower,
                     29 => mode = Mode::Upper,
                     30 => mode = Mode::Punctuation,
-                    31 => todo!("B/S"),
-                    _ => unreachable!("Invalid word {} in Mixed mode", word)
+                    31 => next = Self::get_bytes(bitstr, next, &mut words),
+                    _ => return Err(format!("Invalid word {} in Mixed mode",
+                            word))
                 },
                 Mode::Punctuation => match word {
                     0 => todo!("FLG(n)"),
@@ -499,8 +530,8 @@ impl AztecReader {
                         [word as usize - 27]
                     ),
                     31 => mode = Mode::Upper,
-                    _ => unreachable!("Invalid word {} in Punctuation mode",
-                        word)
+                    _ => return Err(format!(
+                            "Invalid word {} in Punctuation mode", word))
                 },
                 Mode::Digit => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
@@ -510,43 +541,45 @@ impl AztecReader {
                     13 => words.push(b'.'),
                     14 => mode = Mode::Upper,
                     15 => shift_mode = Some(Mode::Upper),
-                    _ => unreachable!("Invalid word {} in Digit mode", word)
+                    _ => return Err(format!("Invalid word {} in Digit mode",
+                            word))
                 }
             }
-            i = next_idx;
-            next_idx += shift_mode.unwrap_or(mode).capacity();
+            i = next;
+            next += shift_mode.unwrap_or(mode).capacity();
         }
 
-        words
+        Ok(words)
     }
 
     fn read(self) -> Result<Vec<u8>, String> {
-        let layers = self.layers;
-        let (codeword_size, prim) = match layers {
+        let (codeword_size, prim) = match self.layers {
              1..=2  => ( 6,       0b1000011),
              3..=8  => ( 8,     0b100101101),
              9..=22 => (10,   0b10000001001),
             23..=32 => (12, 0b1000001101001),
-            _ => unreachable!("Aztec code with {} layers is not supported",
-                layers)
+            x => return Err(format!("Aztec code with {} layers is illegal", x))
         };
         let bits_in_layers =
-            (if self.compact { 88 } else { 112 } + 16 * layers) * layers;
+            (if self.compact { 88 } else { 112 } + 16 * self.layers)
+            * self.layers;
         let start_align = (bits_in_layers % codeword_size) / 2;
 
         let mut words = self.as_words(start_align, codeword_size);
         let rs = ReedSolomon::new(codeword_size as u8, prim);
 
-        let check_words = (bits_in_layers / codeword_size) - self.codewords;
-        rs.fix_errors(&mut words, check_words)?;
+        let nb_check_words = (bits_in_layers / codeword_size) - self.codewords;
+        rs.fix_errors(&mut words, nb_check_words)?;
 
         let mut bitstr = Vec::with_capacity(self.codewords * codeword_size);
         for byte in words[..self.codewords].iter() {
+            // convert [corrected] the codewords into a bitstring
             bitstr.extend((0..codeword_size).rev()
                 .map(|bit| ((byte >> bit) & 1) == 1));
         }
         Self::remove_bitstuffing(&mut bitstr, codeword_size);
-        Ok(Self::to_words(&bitstr))
+        //println!("{:?}", bitstr.iter().map(|&x| if x { '1' } else { '0' }).collect::<String>());
+        Self::to_words(&bitstr)
     }
 
 }
@@ -967,6 +1000,7 @@ impl AztecCodeDetector {
         let mut i = 1;
         let mut j = 0;
         while i < len {
+            // extract the codewords by skipping the corners and anchor grid
             if block == block_size {
                 i += match corner {
                     None | Some(true) => 3,
@@ -1028,16 +1062,15 @@ impl AztecCodeDetector {
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let mut code_type =
+        let (mut code_type, radius) =
             if self.check_ring(row, col, center.mod_size, 12.3) {
-                AztecCodeType::FullSize
+                (AztecCodeType::FullSize, 13.5)
             } else {
-                AztecCodeType::Compact
+                (AztecCodeType::Compact, 9.5)
             };
 
         let sz = center.mod_size.round() as usize;
-        let r = if code_type == AztecCodeType::FullSize { 13.5 } else { 9.5 };
-        let overhead_message = self.sample_ring(&center, r, sz);
+        let overhead_message = self.sample_ring(&center, radius, sz);
         let (layers, codewords) =
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
@@ -1048,7 +1081,7 @@ impl AztecCodeDetector {
         }
 
         let compact = code_type == AztecCodeType::Compact;
-        let (size, md2, samples) = if compact {
+        let (size, md2, samples) = if compact { // md2 <=> (bullseye size) / 2
             (11 + 4 * layers, 5, layers * 2)
         } else {
             let raw_size = 15 + 4 * layers;
@@ -1059,21 +1092,21 @@ impl AztecCodeDetector {
 
         let mut copy = AztecCode::new(compact, size);
         let mid = size / 2;
-        for l in 1..=samples { // TODO: Read content
-            let ring = self.sample_ring(&center, r + 2.0 * l as f32, sz);
-            let side = ring.len() / 4;
-            for cursor in 0..side {
+        for l in 1..=samples {
+            let ring = self.sample_ring(&center, radius + 2.0 * l as f32, sz);
+            let arc = ring.len() / 4; // arc length
+            for cursor in 0..arc {
                 copy[(mid - md2 - l, mid - md2 + 1 + cursor - l)] =
                     ring[cursor];
 
                 copy[(mid - md2 + 1 + cursor - l, mid + md2 + l)] =
-                    ring[cursor + side];
+                    ring[cursor + arc];
 
                 copy[(mid + md2 + l, mid - md2 + cursor - l)] =
-                    ring[3 * side - 1 - cursor];
+                    ring[3 * arc - 1 - cursor];
 
                 copy[(mid - md2 + cursor - l, mid - md2 - l)] =
-                    ring[4 * side - 1 - cursor];
+                    ring[4 * arc - 1 - cursor];
             }
         }
 
@@ -1099,3 +1132,17 @@ impl AztecCodeDetector {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reader_rm_bit_stuffing() {
+        let inp = "0010011100100000011010011011110000101001111001010000010110";
+        let exp = "00100111001000000101001101111000010100111100101000000110";
+        let mut bitstr: Vec<bool> = inp.chars().map(|x| x == '1').collect();
+        let expected: Vec<bool> = exp.chars().map(|x| x == '1').collect();
+        AztecReader::remove_bitstuffing(&mut bitstr, 6);
+        assert_eq!(expected, bitstr);
+    }
+}

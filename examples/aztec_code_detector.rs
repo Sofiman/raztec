@@ -2,7 +2,7 @@ use show_image::{ImageView, ImageInfo, create_window, event};
 use std::time::Instant;
 use std::env;
 
-use raztec::reader::{AztecCodeDetector, Marker};
+use raztec::reader::AztecCodeDetector;
 
 #[show_image::main]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
