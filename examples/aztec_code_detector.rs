@@ -29,8 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(code) => {
                 println!("=> Valid {:?} Aztec code at {:?} (size: {})",
                     code.code_type(), code.location(), code.size());
-                println!("=> Result: {}", std::str::from_utf8(code.data())
+                println!("=> Result: `{}`", std::str::from_utf8(code.data())
                     .unwrap_or(&format!("<raw>{:?}", code.data())));
+                if !code.features().is_empty() {
+                    println!("=> Features: {:?}", code.features());
+                }
             },
             Err(kind) => println!("=> Invalid code, {}", kind)
         }

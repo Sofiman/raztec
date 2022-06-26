@@ -148,11 +148,21 @@ fn div_ceil(a: isize, b: isize) -> isize {
     }
 }
 
+/// Aztec Code Type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AztecCodeType {
     Rune,
     Compact,
     FullSize
+}
+
+/// Aztec Code Special features
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AztecCodeFeature {
+    /// Represents an ECI escape code at the specified index
+    ECI{index: usize, n: usize},
+    /// Represents an FNC1 escape code in the data stream at the specified index
+    FNC1{index: usize}
 }
 
 pub struct ReadAztecCode {
@@ -164,7 +174,8 @@ pub struct ReadAztecCode {
     layers: usize,
     codewords: usize,
     code_type: AztecCodeType,
-    data: Vec<u8>
+    data: Vec<u8>,
+    features: Vec<AztecCodeFeature>
 }
 
 impl ReadAztecCode {
@@ -200,6 +211,11 @@ impl ReadAztecCode {
     /// Returns the number of codewords stored in the read Aztec Code
     pub fn codewords(&self) -> usize {
         self.codewords
+    }
+
+    /// Returns all the features found in the read Aztec Code
+    pub fn features(&self) -> &[AztecCodeFeature] {
+        &self.features
     }
 
     /// Returns the data held by the read Aztec Code
@@ -305,6 +321,8 @@ struct AztecReader {
     codewords: usize,
 }
 
+type ReaderResults = Result<(Vec<u8>, Vec<AztecCodeFeature>), String>;
+
 impl AztecReader {
     fn new(codewords: usize, layers: usize) -> Self {
         let compact = layers <= 4;
@@ -389,6 +407,7 @@ impl AztecReader {
         AztecReader { size, layers, dominos, codewords, compact }
     }
 
+    /// Extract the data contained in the Aztec Code into the reader's dominos
     fn extract(&mut self, code: AztecCode) {
         assert!(code.size() == self.size,
             "Attempt to extract a bigger or smaller than expected Aztec Code");
@@ -439,7 +458,8 @@ impl AztecReader {
         range.iter().fold(0, |acc, &val| (acc << 1) | (val as usize))
     }
 
-    fn get_bytes(bitstr: &[bool], mut i: usize, data: &mut Vec<u8>) -> usize {
+    /// Handle the Word B/S (byte sequence) in the data stream
+    fn handle_bytes(bitstr: &[bool], mut i: usize, data: &mut Vec<u8>) -> usize{
         if i + 5 >= bitstr.len() {
             // not enough data for the length of the byte shift sequence so
             // ignore the B/S word, it is probably end padding ones
@@ -464,11 +484,36 @@ impl AztecReader {
         end
     }
 
-    fn to_words(bitstr: &[bool]) -> Result<Vec<u8>, String> {
+    /// Handle the Word Flg(n) (ECI or FNC1) in the data stream
+    fn handle_flg(bitstr: &[bool], pos: usize, mut i: usize,
+        features: &mut Vec<AztecCodeFeature>) -> usize {
+        let n = Self::get_word_value(&bitstr[i..i+3]);
+        i += 3;
+        if n == 0 {
+            features.push(AztecCodeFeature::FNC1{index: pos});
+            return i;
+        }
+        let mut n = 0;
+        let end = i + n * 4;
+        for j in (i..end).step_by(4) {
+            let digit = Self::get_word_value(&bitstr[j..j+4]);
+            if !(2..11).contains(&digit) {
+                return end; // invalid digit
+            }
+            n = n * 10 + digit - 2;
+        }
+        features.push(AztecCodeFeature::ECI{index: pos, n});
+        end
+    }
+
+    /// Extract the data and features of the Read Aztec Code
+    fn to_words(bitstr: &[bool]) -> ReaderResults {
         let l = bitstr.len();
+        let mut words = vec![];
+        let mut features = vec![];
+
         let mut mode = Mode::Upper;
         let mut shift_mode = None;
-        let mut words = vec![];
 
         let mut i = 0;
         let mut next = mode.capacity(); // next idx
@@ -496,7 +541,7 @@ impl AztecReader {
                     },
                     29 => mode = Mode::Mixed,
                     30 => mode = Mode::Digit,
-                    31 => next = Self::get_bytes(bitstr, next, &mut words),
+                    31 => next = Self::handle_bytes(bitstr, next, &mut words),
                     _ => return Err(format!("Invalid word {} in {:?} mode",
                         word, current_mode))
                 },
@@ -512,12 +557,13 @@ impl AztecReader {
                     28 => mode = Mode::Lower,
                     29 => mode = Mode::Upper,
                     30 => mode = Mode::Punctuation,
-                    31 => next = Self::get_bytes(bitstr, next, &mut words),
+                    31 => next = Self::handle_bytes(bitstr, next, &mut words),
                     _ => return Err(format!("Invalid word {} in Mixed mode",
                             word))
                 },
                 Mode::Punctuation => match word {
-                    0 => todo!("FLG(n)"),
+                    0 => next = Self::handle_flg(bitstr, words.len(), next,
+                            &mut features),
                     1 => words.push(b'\r'),
                     2 => words.extend([b'\r', b'\n']),
                     3 => words.extend([b'.', b' ']),
@@ -549,10 +595,11 @@ impl AztecReader {
             next += shift_mode.unwrap_or(mode).capacity();
         }
 
-        Ok(words)
+        Ok((words, features))
     }
 
-    fn read(self) -> Result<Vec<u8>, String> {
+    /// Decodes the Aztec Code into the couple (extracted_data, features).
+    fn read(self) -> ReaderResults {
         let (codeword_size, prim) = match self.layers {
              1..=2  => ( 6,       0b1000011),
              3..=8  => ( 8,     0b100101101),
@@ -979,6 +1026,9 @@ impl AztecCodeDetector {
         sample
     }
 
+    /// Extract the Aztec Code metadata including the number of layers and the
+    /// number of codewords contained in the Overhead message. This function
+    /// also distingushes Rune Aztec codes from Compact Aztec Codes.
     fn get_aztec_metadata(&self, mk: Marker, code_type: &mut AztecCodeType,
         message: &[bool]) -> Result<(usize, usize), AztecReadError> {
 
@@ -1077,7 +1127,8 @@ impl AztecCodeDetector {
 
         if code_type == AztecCodeType::Rune {
             return Ok(ReadAztecCode { loc: center.loc, size: 11, code_type,
-                data: vec![codewords as u8], center, codewords: 1, layers: 0 });
+                data: vec![codewords as u8], center, codewords: 1, layers: 0,
+                features: vec![] });
         }
 
         let compact = code_type == AztecCodeType::Compact;
@@ -1112,10 +1163,10 @@ impl AztecCodeDetector {
 
         let mut rd = AztecReader::new(codewords, layers);
         rd.extract(copy);
-        let val = rd.read().map_err(|msg|
+        let (data, features) = rd.read().map_err(|msg|
             AztecReadError::CorruptedMessage(center.as_marker(), msg))?;
 
-        Ok(ReadAztecCode { loc: center.loc, size, data: val,
+        Ok(ReadAztecCode { loc: center.loc, size, data, features,
             code_type, center, layers, codewords })
     }
 
