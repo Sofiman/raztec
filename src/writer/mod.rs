@@ -7,9 +7,9 @@
 //! Symbology Specification (ISO/IEC 24778).
 //!
 //! Aztec Codes can contain different types of information as Text, Binary data
-//! or more complex text using Enhanced Channel Interpretation (ECI). Pleas
-//! keep in mind that Aztec Codes containing ECI must be read by compatible
-//! scanners (at the risk of data corruption).
+//! or more complex text using Enhanced Channel Interpretation (ECI) or GS1
+//! codes. Pleas keep in mind that Aztec Codes containing ECI must be read by
+//! compatible scanners (at the risk of data corruption).
 //!
 //! # Examples
 //!
@@ -21,6 +21,16 @@
 //!    .append("Hello").append(", ").append_bytes("World!".as_bytes())
 //!    .build().unwrap();
 //! ```
+//!
+//! Example of generating an Aztec Code using the FNC1 escape code to represent
+//! the following GS1 code: (*01*)95012345678903
+//!```rust
+//!use raztec::writer::AztecCodeBuilder;
+//!let code = AztecCodeBuilder::new()
+//!      .error_correction(50)
+//!      .append_fnc1().append("0195012345678903")
+//!      .build().unwrap();
+//!```
 //!
 //! Here is an example of generating an Aztec rune with the value 38:
 //! ```rust
@@ -509,11 +519,17 @@ impl AztecCodeBuilder {
 
     /// Appends an ECI escape code to the Aztec Code.
     /// The default ECI indicator is \000003 (code = 3).
-    pub fn append_eci(&mut self, code: u16) -> &mut AztecCodeBuilder {
+    pub fn append_eci(&mut self, code: u32) -> &mut AztecCodeBuilder {
         let repr = code.to_string();
         assert!(repr.len() < 7, "ECI codes with 7+ digits are illegal");
         self.push_in((Word::Flg(repr.len() as u8), Mode::Punctuation), None);
         self.words.extend(repr.chars().map(Word::digit));
+        self
+    }
+
+    /// Appends an FNC1 escape code to the Aztec Code.
+    pub fn append_fnc1(&mut self) -> &mut AztecCodeBuilder {
+        self.push_in((Word::Flg(0), Mode::Punctuation), None);
         self
     }
 
@@ -609,8 +625,9 @@ impl AztecCodeBuilder {
             124       => Ok((Word::Mixed(25), Mode::Mixed)), // |
             125       => Ok((Word::Punc(30), Mode::Punctuation)), // } 
             126..=127 => Ok((Word::Mixed(c as u8 - 100), Mode::Mixed)), // ~ -> DEL
-            x => panic!("Character not supported `{}` (code: {}) at index {}",
-                c.escape_default(), x, i)
+            x => Err(format!(
+                    "Character not supported `{}` (code: {}) at index {}",
+                    c.escape_default(), x, i))
         }
     }
 
