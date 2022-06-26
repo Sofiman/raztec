@@ -487,7 +487,7 @@ impl AztecCodeBuilder {
         if (32..=62).contains(&len) {
             // Two 5-bit byte shift sequences are more compact than one 11-bit.
             self.append_bytes(&bytes[0..31]);
-            return self.append_bytes(&bytes[32..]);
+            return self.append_bytes(&bytes[31..]);
         }
 
         // shift to Binary mode
