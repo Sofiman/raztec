@@ -112,8 +112,7 @@ impl AztecCenter {
     /// the size in pixels of one data unit of the code.
     pub fn block_size(&self) -> f32 { self.mod_size }
 
-    /// Estimated block size of the Aztec Code. Note that "block size" refer to
-    /// the size in pixels of one data unit of the code.
+    /// Detected corners of the center of the bullseye
     pub fn corners(&self) -> &[(usize, usize); 4] { &self.corners }
 
     fn dst_sqd(&self, other: &AztecCenter) -> usize {
@@ -148,11 +147,22 @@ fn div_ceil(a: isize, b: isize) -> isize {
     }
 }
 
-/// Aztec Code Type
+/// Supported Aztec Code types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AztecCodeType {
+    /// An Aztec Rune is a special Compact Aztec Code that can hold a single
+    /// byte of information while having a very small footprint
     Rune,
+
+    /// A Compact Aztec Code is a type of Aztec Code constructed by 1 to 4
+    /// layers (608 bits available for 4 layers, for examples: 110 numbers, 89
+    /// signs (text), 53 bytes). Note that a Compact Aztec Code can hold more
+    /// data than a Full-Size Aztec Code and therefore Full-Size codes with at
+    /// most 4 layers are rarely used.
     Compact,
+
+    /// A Full-Size Aztec Code can be constructed by 1 to 32 layers which can
+    /// hold up to 3832 digits, 3067 letters, or 1914 bytes of data.
     FullSize
 }
 
@@ -161,7 +171,11 @@ pub enum AztecCodeType {
 pub enum AztecCodeFeature {
     /// Represents an ECI escape code at the specified index
     ECI{index: usize, n: usize},
-    /// Represents an FNC1 escape code in the data stream at the specified index
+
+    /// Represents an FNC1 escape code in the data stream at the specified
+    /// index. This escape symbol is used to mark the presence of an GS1 AI
+    /// (Application Identifier). Note that this feature may appear multiple
+    /// times in a single code, see GS1 barcode standards for examples.
     FNC1{index: usize}
 }
 
@@ -1014,11 +1028,11 @@ impl AztecCodeDetector {
             sample[i + sc] = self.sample_block(r, c, bl, bl);
             self.markers.push(Marker::orange((c, r), (bl, bl)));
 
-            let (r, c) = (row + middle, col - middle + d + bl - block);
+            let (r, c) = (row + middle, col - middle + d - bl);
             sample[sc - 1 - i + 2 * sc] = self.sample_block(r, c, bl, bl);
             self.markers.push(Marker::blue((c, r), (bl, bl)));
 
-            let (r, c) = (row - middle + d + bl - block, col - middle - bl);
+            let (r, c) = (row - middle + d - bl, col - middle - bl);
             sample[sc - 1 - i + 3 * sc] = self.sample_block(r, c, bl, bl);
             self.markers.push(Marker::red((c, r), (bl, bl)));
         }
