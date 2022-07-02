@@ -439,7 +439,7 @@ impl AztecReader {
         let mut words = Vec::with_capacity(self.dominos.len() / dpc);
         for codeword in self.dominos[skip..].chunks(dpc) {
             words.push(codeword.iter().fold(0, |acc, dom| {
-                ((dom.head as usize) << 1) | (dom.tail as usize) | (acc << 2)
+                (acc << 2) | ((dom.head as usize) << 1) | (dom.tail as usize)
             }))
         }
         words
@@ -1003,38 +1003,47 @@ impl AztecCodeDetector {
         bal > 0
     }
 
-    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, block: usize)
+    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, samples: usize)
         -> Vec<bool> {
         let (col, row) = center.loc;
+        let (col, row) = (col as f32, row as f32);
 
-        let dst = (center.mod_size * radius).ceil() as usize;
+        let side = center.mod_size * radius;
+        let middle = side * 0.5;
+        let bl = center.mod_size * 0.5; // block middle
+        let bl_i = bl.round() as usize; // block middle rounded
+        let ds = center.mod_size; // distance step
+        /*
         let middle = dst / 2;
         if col < middle || row < middle ||
             col + middle > self.width || row + middle > self.height {
             return vec![];
-        }
+        }*/
 
-        let sc = dst / block + 1; // sample_count
-        let bl = block / 2;
-        let mut sample = vec![false; sc * 4];
-        for i in 0..sc {
-            let d = i * block;
+        let samples = samples - 1;
+        let mut sample = vec![false; samples * 4];
+        for i in 0..samples {
+            let d = i as f32 * ds;
 
-            let (r, c) = (row - middle - bl, col - middle + d + block - bl);
-            sample[i] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::green((c, r), (bl, bl)));
+            let srow = (row - middle - bl).round() as usize; // sample row
+            let scol = (col - middle + d + bl).round() as usize; // sample col
+            sample[i] = self.sample_block(srow, scol, bl_i, bl_i);
+            self.markers.push(Marker::green((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row - middle + d + block - bl, col + middle);
-            sample[i + sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::orange((c, r), (bl, bl)));
+            let srow = (row - middle + d + bl).round() as usize; // sample row
+            let scol = (col + middle).round() as usize; // sample col
+            sample[i + samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            self.markers.push(Marker::orange((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row + middle, col - middle + d - bl);
-            sample[sc - 1 - i + 2 * sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::blue((c, r), (bl, bl)));
+            let srow = (row + middle).round() as usize; // sample row
+            let scol = (col + middle - d - ds).round() as usize; // sample col
+            sample[i + 2 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            self.markers.push(Marker::blue((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row - middle + d - bl, col - middle - bl);
-            sample[sc - 1 - i + 3 * sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::red((c, r), (bl, bl)));
+            let srow = (row + middle - d - ds).round() as usize; // sample row
+            let scol = (col - middle - bl).round() as usize; // sample col
+            sample[i + 3 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            self.markers.push(Marker::red((scol, srow), (bl_i, bl_i)));
         }
 
         sample
@@ -1126,15 +1135,14 @@ impl AztecCodeDetector {
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let (mut code_type, radius) =
+        let (mut code_type, radius, samples) =
             if self.check_ring(row, col, center.mod_size, 12.3) {
-                (AztecCodeType::FullSize, 13.5)
+                (AztecCodeType::FullSize, 13.5, 15)
             } else {
-                (AztecCodeType::Compact, 9.5)
+                (AztecCodeType::Compact, 9.5, 11)
             };
 
-        let sz = center.mod_size.round() as usize;
-        let overhead_message = self.sample_ring(&center, radius, sz);
+        let overhead_message = self.sample_ring(&center, radius, samples);
         let (layers, codewords) =
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
@@ -1146,19 +1154,20 @@ impl AztecCodeDetector {
         }
 
         let compact = code_type == AztecCodeType::Compact;
-        let (size, md2, samples) = if compact { // md2 <=> (bullseye size) / 2
-            (11 + 4 * layers, 5, layers * 2)
+        let (bs, size, md2, samples) = if compact { // md2 <=> (bullseye size) / 2
+            (11, 11 + 4 * layers, 5, layers * 2)
         } else {
             let raw_size = 15 + 4 * layers;
             let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
             let size = raw_size + 2 * anchor_grid;
-            (size, 7, (layers + anchor_grid) * 2)
+            (15, size, 7, layers * 2 + anchor_grid)
         };
 
         let mut copy = AztecCode::new(compact, size);
         let mid = size / 2;
         for l in 1..=samples {
-            let ring = self.sample_ring(&center, radius + 2.0 * l as f32, sz);
+            let ring = self.sample_ring(&center, radius + 2.0 * l as f32,
+                bs + l * 2);
             let arc = ring.len() / 4; // arc length
             for cursor in 0..arc {
                 copy[(mid - md2 - l, mid - md2 + 1 + cursor - l)] =
