@@ -338,8 +338,7 @@ struct AztecReader {
 type ReaderResults = Result<(Vec<u8>, Vec<AztecCodeFeature>), String>;
 
 impl AztecReader {
-    fn new(codewords: usize, layers: usize) -> Self {
-        let compact = layers <= 4;
+    fn new(layers: usize, codewords: usize, compact: bool) -> Self {
         let bullseye_size = if compact { 11 } else { 15 };
         let raw_size = layers * 4 + bullseye_size;
         let size = if compact {
@@ -371,7 +370,7 @@ impl AztecReader {
             let mid = (size / 2) % 16;
             let mut idx = 0;
             let mut skips = 0;
-            let mut dpl = (layers - 5) * 4 + 32; // domino per line
+            let mut dpl = layers * 4 + 12; // domino per line
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
@@ -634,7 +633,7 @@ impl AztecReader {
 
         let mut bitstr = Vec::with_capacity(self.codewords * codeword_size);
         for byte in words[..self.codewords].iter() {
-            // convert [corrected] the codewords into a bitstring
+            // convert the [corrected] codewords into a bitstring
             bitstr.extend((0..codeword_size).rev()
                 .map(|bit| ((byte >> bit) & 1) == 1));
         }
@@ -660,7 +659,7 @@ impl AztecCodeDetector {
     /// # Arguments
     /// * (`w`, `h`): The width and height of the grayscale image
     /// * `mono`: The grayscale pixel array (8 bits)
-    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector {
+    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector{
         AztecCodeDetector {
             width: w as usize, height: h as usize,
             image: mono.iter().map(|&x| x < 104).collect(),
@@ -1184,7 +1183,7 @@ impl AztecCodeDetector {
             }
         }
 
-        let mut rd = AztecReader::new(codewords, layers);
+        let mut rd = AztecReader::new(layers, codewords, compact);
         rd.extract(copy);
         let (data, features) = rd.read().map_err(|msg|
             AztecReadError::CorruptedMessage(center.as_marker(), msg))?;
