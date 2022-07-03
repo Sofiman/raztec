@@ -7,7 +7,7 @@ use super::{reed_solomon::ReedSolomon, AztecCode};
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
     /// The Aztec code located at the marker's position couldn't be read because
-    /// it was rotated or skewed
+    /// it was distorted or skewed
     BadSymbolOrientation(Marker, String),
 
     /// The Aztec Code located at the marker's position couldn't be read because
@@ -137,7 +137,7 @@ impl AztecCenter {
     }
 }
 
-fn div_ceil(a: isize, b: isize) -> isize {
+fn div_ceil(a: i32, b: i32) -> i32 {
     let d = a / b;
     let r = a % b;
     if (r > 0 && b > 0) || (r < 0 && b < 0) {
@@ -250,19 +250,14 @@ impl ReadAztecCode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 enum Direction {
+    #[default]
     None,
     Down,
     Left,
     Up,
     Right,
-}
-
-impl Default for Direction {
-    fn default() -> Self {
-        Direction::None
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -534,6 +529,9 @@ impl AztecReader {
 
     fn handle_sj(bitstr: &[bool], i: usize,
         features: &mut Vec<AztecCodeFeature>, msg_id: Vec<u8>) -> usize {
+        if i + 10 > bitstr.len() {
+            return i + 10; // not enough data
+        }
         let order = Self::get_word_value(&bitstr[i..i+5]);
         let total = Self::get_word_value(&bitstr[i+5..i+10]);
         if order > 1 && total > 1 && order < 28 && total < 28 && order <= total{
@@ -737,28 +735,28 @@ impl AztecCodeDetector {
         self.markers.clear();
     }
 
-    fn check_ratio(&self, counts: &[usize; 5], total: usize) -> bool {
+    fn check_ratio(&self, counts: &[i32; 5], total: i32) -> bool {
         if total < 5 {
             return false;
         }
-        let mod_size = div_ceil(total as isize, 5);
+        let mod_size = div_ceil(total, 5);
         let max_v = mod_size / 2;
 
         let mut i = 0;
-        while i < 5 && (mod_size - counts[i] as isize).abs() < max_v {
+        while i < 5 && (mod_size - counts[i]).abs() < max_v {
             i += 1;
         }
         i == 5
     }
 
-    fn center_from_end(&self, counts: &[usize; 5], col: usize) -> usize {
-        col - counts[3..].iter().sum::<usize>() - counts[2] / 2
+    fn center_from_end(&self, counts: &[i32; 5], col: usize) -> usize {
+        col - counts[3..].iter().sum::<i32>() as usize - counts[2] as usize / 2
     }
 
-    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize,
-        total: usize) -> Option<(usize, usize, usize)> {
+    fn check_vertical(&mut self, start_row: usize, col: usize, mid: i32,
+        total: i32) -> Option<(usize, usize, usize)> {
         let mut row = start_row + 1;
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
 
         // Going up to the border of the current square
         while row > 0 && self.get_px(row - 1, col) {
@@ -804,9 +802,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        if (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        if (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
             Some((start, self.center_from_end(&counts, row - 1), row - 2))
         } else {
@@ -814,10 +811,10 @@ impl AztecCodeDetector {
         }
     }
 
-    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize,
-        total: usize) -> Option<(usize, usize, usize)> {
+    fn check_horizontal(&self, row: usize, start_col: usize, mid: i32,
+        total: i32) -> Option<(usize, usize, usize)> {
         let mut col = start_col + 1;
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
 
         // Going up to the border of the current square
         while col > 0 && self.get_px(row, col - 1) {
@@ -863,9 +860,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        if (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        if (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
             Some((start, self.center_from_end(&counts, col - 1), col - 2))
         } else {
@@ -873,9 +869,9 @@ impl AztecCodeDetector {
         }
     }
 
-    fn check_diag(&mut self, row: usize, col: usize, mid: usize, total: usize)
+    fn check_diag(&mut self, row: usize, col: usize, mid: i32, total: i32)
         -> bool {
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
         let mut i = 0;
 
         // Going up to the border of the current square
@@ -921,9 +917,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total)
     }
 
@@ -965,8 +960,8 @@ impl AztecCodeDetector {
         (row, col)
     }
 
-    fn handle_center(&mut self, counts: &[usize; 5], row: usize, col: usize,
-        total: usize, centers: &mut Vec<AztecCenter>) -> Option<()> {
+    fn handle_center(&mut self, counts: &[i32; 5], row: usize, col: usize,
+        total: i32, centers: &mut Vec<AztecCenter>) -> Option<()> {
 
         let mid_val = counts[2] + counts[3] / 2;
         let center_col = self.center_from_end(counts, col);
@@ -1013,6 +1008,7 @@ impl AztecCodeDetector {
     pub fn detect_codes(&mut self) -> Vec<AztecCenter> {
         let mut centers = vec![];
         let mut counts = [0; 5];
+
         for row in 0..self.height {
             counts.fill(0);
             let mut current_state = 0;
@@ -1026,7 +1022,7 @@ impl AztecCodeDetector {
                 } else if current_state % 2 == 1 {
                     counts[current_state] += 1;
                 } else if current_state == 4 {
-                    let total: usize = counts.iter().sum();
+                    let total: i32 = counts.iter().sum();
                     if self.check_ratio(&counts, total) &&
                         self.handle_center(&counts, row, col, total,
                             &mut centers).is_some() {
@@ -1034,7 +1030,9 @@ impl AztecCodeDetector {
                         current_state = 0;
                     } else {
                         current_state = 3;
-                        counts.rotate_left(2);
+                        counts[0] = counts[2];
+                        counts[1] = counts[3];
+                        counts[2] = counts[4];
                         counts[3] = 1;
                         counts[4] = 0;
                     }
@@ -1049,16 +1047,12 @@ impl AztecCodeDetector {
 
     fn sample_block(&mut self, row: usize, col: usize, w: usize, h: usize)
         -> bool {
-        let mut bal: isize = 0;
-        let (w2, h2) = (w / 2, h / 2);
-        for i in 0..=w {
-            for j in 0..=h {
-                let nr = row + j;
-                let nc = col + i;
-                if nr >= h2         && nc >= w2 &&
-                   nr < self.height && nc < self.width {
-                    bal += if self.get_px(nr - h2, nc - w2) { 1 } else { -1 };
-                }
+        let mut bal = 0;
+        let h_end = (col + w).min(self.width);
+        let v_end = (row + h).min(self.height);
+        for nc in col..h_end {
+            for nr in row..v_end {
+                bal += if self.get_px(nr, nc) { 1 } else { -1 };
             }
         }
         bal > 0
@@ -1075,7 +1069,7 @@ impl AztecCodeDetector {
         let bl_i = bl.round() as usize; // block middle rounded
         let ds = center.mod_size; // distance step
 
-        if col < middle || row < middle || col + middle > self.width as f32 || 
+        if col < middle || row < middle || col + middle > self.width as f32 ||
             row + middle > self.height as f32 {
             return vec![];
         }
@@ -1088,22 +1082,22 @@ impl AztecCodeDetector {
             let srow = (row - middle - bl).round() as usize; // sample row
             let scol = (col - middle + d + bl).round() as usize; // sample col
             sample[i] = self.sample_block(srow, scol, bl_i, bl_i);
-            self.markers.push(Marker::green((scol, srow), (bl_i, bl_i)));
+            //self.markers.push(Marker::green((scol, srow), (bl_i, bl_i)));
 
             let srow = (row - middle + d + bl).round() as usize; // sample row
             let scol = (col + middle).round() as usize; // sample col
             sample[i + samples] = self.sample_block(srow, scol, bl_i, bl_i);
-            self.markers.push(Marker::orange((scol, srow), (bl_i, bl_i)));
+            //self.markers.push(Marker::orange((scol, srow), (bl_i, bl_i)));
 
             let srow = (row + middle).round() as usize; // sample row
             let scol = (col + middle - d - ds).round() as usize; // sample col
             sample[i + 2 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
-            self.markers.push(Marker::blue((scol, srow), (bl_i, bl_i)));
+            //self.markers.push(Marker::blue((scol, srow), (bl_i, bl_i)));
 
             let srow = (row + middle - d - ds).round() as usize; // sample row
             let scol = (col - middle - bl).round() as usize; // sample col
             sample[i + 3 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
-            self.markers.push(Marker::red((scol, srow), (bl_i, bl_i)));
+            //self.markers.push(Marker::red((scol, srow), (bl_i, bl_i)));
         }
 
         sample
