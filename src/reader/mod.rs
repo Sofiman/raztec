@@ -167,16 +167,23 @@ pub enum AztecCodeType {
 }
 
 /// Aztec Code Special features
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AztecCodeFeature {
-    /// Represents an ECI escape code at the specified index
+    /// Represents an ECI escape code at the specified index.
     ECI{index: usize, n: usize},
 
     /// Represents an FNC1 escape code in the data stream at the specified
     /// index. This escape symbol is used to mark the presence of an GS1 AI
     /// (Application Identifier). Note that this feature may appear multiple
     /// times in a single code, see GS1 barcode standards for examples.
-    FNC1{index: usize}
+    FNC1{index: usize},
+
+    /// Structured connection or Structured Join allows linking multiple Aztec
+    /// Codes together via discrete headers that contain information about the
+    /// message ID (which may be empty), the ordinal number of the symbol in the
+    /// sequence and the total number of symbols in the sequence. This feature 
+    /// supports up to 26 Aztec Codes linked together.
+    JOIN{msg_id: Vec<u8>, order: u8, total: u8}
 }
 
 pub struct ReadAztecCode {
@@ -325,6 +332,12 @@ impl Mode {
             _ => 5
         }
     }
+}
+
+enum SJState {
+    None,
+    Detected(bool),
+    Init,
 }
 
 struct AztecReader {
@@ -519,11 +532,24 @@ impl AztecReader {
         end
     }
 
+    fn handle_sj(bitstr: &[bool], i: usize,
+        features: &mut Vec<AztecCodeFeature>, msg_id: Vec<u8>) -> usize {
+        let order = Self::get_word_value(&bitstr[i..i+5]);
+        let total = Self::get_word_value(&bitstr[i+5..i+10]);
+        if order > 1 && total > 1 && order < 28 && total < 28 && order <= total{
+            let order = order as u8 - 2;
+            let total = total as u8 - 1; // Starts at 1 (length indicator)
+            features.push(AztecCodeFeature::JOIN{msg_id, order, total});
+        }
+        i + 10
+    }
+
     /// Extract the data and features of the Read Aztec Code
     fn to_words(bitstr: &[bool]) -> ReaderResults {
         let l = bitstr.len();
         let mut words = vec![];
         let mut features = vec![];
+        let mut sj_state = SJState::None; // Structured join state
 
         let mut mode = Mode::Upper;
         let mut shift_mode = None;
@@ -536,15 +562,35 @@ impl AztecReader {
             match current_mode {
                 Mode::Upper | Mode::Lower => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
-                    2..=27 => {
-                        let offset = if current_mode == Mode::Upper {
-                            b'A'
-                        } else {
-                            b'a'
-                        };
-                        words.push(offset + word as u8 - 2);
-                    }
+                    1 => match sj_state {
+                        SJState::Detected(_) => sj_state = SJState::Init,
+                        SJState::Init => {
+                            next = Self::handle_sj(bitstr, next, &mut features,
+                                words.clone());
+                            sj_state = SJState::None;
+                            words.clear();
+                        }
+                        _ => words.push(b' ')
+                    },
+                    2..=27 => match sj_state {
+                        SJState::Detected(false) =>
+                            sj_state = SJState::Detected(true),
+                        SJState::Detected(true) => {
+                            if next > 10 {
+                                next = Self::handle_sj(bitstr, next - 10,
+                                    &mut features, vec![]);
+                            }
+                            sj_state = SJState::None;
+                        },
+                        _ => {
+                            let offset = if current_mode == Mode::Upper {
+                                b'A'
+                            } else {
+                                b'a'
+                            };
+                            words.push(offset + word as u8 - 2);
+                        }
+                    },
                     28 => {
                         if current_mode == Mode::Upper {
                             mode = Mode::Lower;
@@ -560,7 +606,10 @@ impl AztecReader {
                 },
                 Mode::Mixed => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
+                    1 => match sj_state {
+                        SJState::Init => sj_state = SJState::None,
+                        _ => words.push(b' ')
+                    },
                     2..=14 => words.push(1 + word as u8 - 2),
                     15..=19 => words.push(27 + word as u8 - 15),
                     20..=27 => words.push(
@@ -568,7 +617,12 @@ impl AztecReader {
                         [word as usize - 20]
                     ),
                     28 => mode = Mode::Lower,
-                    29 => mode = Mode::Upper,
+                    29 => {
+                        if i == 5 { // Check the Structured join flag (M/L,U/L)
+                            sj_state = SJState::Detected(false);
+                        }
+                        mode = Mode::Upper;
+                    },
                     30 => mode = Mode::Punctuation,
                     31 => next = Self::handle_bytes(bitstr, next, &mut words),
                     _ => return Err(format!("Invalid word {} in Mixed mode",
@@ -594,7 +648,10 @@ impl AztecReader {
                 },
                 Mode::Digit => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
+                    1 => match sj_state {
+                        SJState::Init => sj_state = SJState::None,
+                        _ => words.push(b' ')
+                    },
                     2..=11 => words.push(b'0' + word as u8 - 2),
                     12 => words.push(b','),
                     13 => words.push(b'.'),
@@ -628,7 +685,12 @@ impl AztecReader {
         let mut words = self.as_words(start_align, codeword_size);
         let rs = ReedSolomon::new(codeword_size as u8, prim);
 
-        let nb_check_words = (bits_in_layers / codeword_size) - self.codewords;
+        let total_codewords = bits_in_layers / codeword_size;
+        if self.codewords >= total_codewords {
+            return Err(format!("Invalid codeword count, expected <{}, got {}",
+                    total_codewords, self.codewords));
+        }
+        let nb_check_words = total_codewords - self.codewords;
         rs.fix_errors(&mut words, nb_check_words)?;
 
         let mut bitstr = Vec::with_capacity(self.codewords * codeword_size);
@@ -1012,12 +1074,11 @@ impl AztecCodeDetector {
         let bl = center.mod_size * 0.5; // block middle
         let bl_i = bl.round() as usize; // block middle rounded
         let ds = center.mod_size; // distance step
-        /*
-        let middle = dst / 2;
-        if col < middle || row < middle ||
-            col + middle > self.width || row + middle > self.height {
+
+        if col < middle || row < middle || col + middle > self.width as f32 || 
+            row + middle > self.height as f32 {
             return vec![];
-        }*/
+        }
 
         let samples = samples - 1;
         let mut sample = vec![false; samples * 4];
@@ -1134,14 +1195,20 @@ impl AztecCodeDetector {
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let (mut code_type, radius, samples) =
+        let (mut code_type, radius, bullseye_size) =
             if self.check_ring(row, col, center.mod_size, 12.3) {
                 (AztecCodeType::FullSize, 13.5, 15)
             } else {
                 (AztecCodeType::Compact, 9.5, 11)
             };
 
-        let overhead_message = self.sample_ring(&center, radius, samples);
+        let overhead_message = self.sample_ring(&center, radius, bullseye_size);
+        if overhead_message.is_empty() {
+            return Err(AztecReadError::BadSymbolOrientation(
+                    center.as_marker(),
+                    format!("Failed to sample {:?} overhead message",code_type))
+                )
+        }
         let (layers, codewords) =
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
@@ -1153,20 +1220,28 @@ impl AztecCodeDetector {
         }
 
         let compact = code_type == AztecCodeType::Compact;
-        let (bs, size, md2, samples) = if compact { // md2 <=> (bullseye size) / 2
-            (11, 11 + 4 * layers, 5, layers * 2)
+        let (size, samples) = if compact {
+            (11 + 4 * layers, layers * 2)
         } else {
             let raw_size = 15 + 4 * layers;
             let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
             let size = raw_size + 2 * anchor_grid;
-            (15, size, 7, layers * 2 + anchor_grid)
+            (size, layers * 2 + anchor_grid)
         };
 
         let mut copy = AztecCode::new(compact, size);
         let mid = size / 2;
+        let md2 = bullseye_size / 2; // md2 <=> (bullseye size) / 2
         for l in 1..=samples {
             let ring = self.sample_ring(&center, radius + 2.0 * l as f32,
-                bs + l * 2);
+                bullseye_size + l * 2);
+            if ring.is_empty() {
+                return Err(AztecReadError::BadSymbolOrientation(
+                        center.as_marker(),
+                        format!("Failed to sample layer {} (ring out of bound)",
+                        l))
+                    )
+            }
             let arc = ring.len() / 4; // arc length
             for cursor in 0..arc {
                 copy[(mid - md2 - l, mid - md2 + 1 + cursor - l)] =
