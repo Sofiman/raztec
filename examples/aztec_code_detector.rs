@@ -2,7 +2,7 @@ use show_image::{ImageView, ImageInfo, create_window, event};
 use std::time::Instant;
 use std::env;
 
-use raztec::reader::AztecCodeDetector;
+use raztec::reader::{AztecCodeDetector, filters};
 
 #[show_image::main]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -14,7 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Finding Aztec Codes...");
     let start = Instant::now();
-    let mut finder = AztecCodeDetector::from_grayscale((w, h), &pixels);
+    let bw = filters::process_image(&pixels);
+    let mut finder = AztecCodeDetector::raw((w, h), bw.clone());
     let candidates = finder.detect_codes();
     println!("Found {} candidates in {:?}", candidates.len(), start.elapsed());
     println!("Here is the results:");
@@ -39,8 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut pixels: Vec<u32> = pixels.iter()
-        .map(|&x| x as u32 * 0xFFFFFF / 255).collect();
+    let mut pixels: Vec<u32> = bw.iter()
+        .map(|&x| if x { 0xFFFFFF } else { 0 }).collect();
     for marker in finder.markers().iter().chain(markers.iter()) {
         let (col, row) = marker.loc();
         let (mw, mh) = marker.size();
