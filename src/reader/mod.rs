@@ -1,5 +1,6 @@
 //! Aztec Reader module
 
+pub mod filters;
 use std::fmt::Display;
 use super::{reed_solomon::ReedSolomon, AztecCode};
 
@@ -7,7 +8,7 @@ use super::{reed_solomon::ReedSolomon, AztecCode};
 /// Represents the state in which the AztecReader has failed
 pub enum AztecReadError {
     /// The Aztec code located at the marker's position couldn't be read because
-    /// it was rotated or skewed
+    /// it was distorted or skewed
     BadSymbolOrientation(Marker, String),
 
     /// The Aztec Code located at the marker's position couldn't be read because
@@ -52,22 +53,27 @@ pub struct Marker {
 }
 
 impl Marker {
+    /// New red (#FF0000) marker
     pub fn red(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xff0000, loc, size }
     }
 
+    /// New orange (#FFB86C) marker
     pub fn orange(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xffb86c, loc, size }
     }
 
+    /// New green (#00FF00) marker
     pub fn green(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0x00ff00, loc, size }
     }
 
+    /// New blue (#0000FF) marker
     pub fn blue(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0x0000ff, loc, size }
     }
 
+    /// New pink (#FF89c6) marker
     pub fn pink(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xff79c6, loc, size }
     }
@@ -112,8 +118,7 @@ impl AztecCenter {
     /// the size in pixels of one data unit of the code.
     pub fn block_size(&self) -> f32 { self.mod_size }
 
-    /// Estimated block size of the Aztec Code. Note that "block size" refer to
-    /// the size in pixels of one data unit of the code.
+    /// Detected corners of the center of the bullseye
     pub fn corners(&self) -> &[(usize, usize); 4] { &self.corners }
 
     fn dst_sqd(&self, other: &AztecCenter) -> usize {
@@ -138,7 +143,7 @@ impl AztecCenter {
     }
 }
 
-fn div_ceil(a: isize, b: isize) -> isize {
+fn div_ceil(a: i32, b: i32) -> i32 {
     let d = a / b;
     let r = a % b;
     if (r > 0 && b > 0) || (r < 0 && b < 0) {
@@ -148,23 +153,80 @@ fn div_ceil(a: isize, b: isize) -> isize {
     }
 }
 
-/// Aztec Code Type
+/// Supported Aztec Code types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AztecCodeType {
+    /// An Aztec Rune is a special Compact Aztec Code that can hold a single
+    /// byte of information while having a very small footprint
     Rune,
+
+    /// A Compact Aztec Code is a type of Aztec Code constructed by 1 to 4
+    /// layers (608 bits available for 4 layers, for examples: 110 numbers, 89
+    /// signs (text), 53 bytes). Note that a Compact Aztec Code can hold more
+    /// data than a Full-Size Aztec Code and therefore Full-Size codes with at
+    /// most 4 layers are rarely used.
     Compact,
+
+    /// A Full-Size Aztec Code can be constructed by 1 to 32 layers which can
+    /// hold up to 3832 digits, 3067 letters, or 1914 bytes of data.
     FullSize
 }
 
 /// Aztec Code Special features
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AztecCodeFeature {
-    /// Represents an ECI escape code at the specified index
-    ECI{index: usize, n: usize},
-    /// Represents an FNC1 escape code in the data stream at the specified index
-    FNC1{index: usize}
+    /// Represents an ECI escape code at the specified index.
+    ECI {
+        /// The index in the output buffer after the ECI becomes active.
+        ///
+        /// # Examples:
+        /// Buffer: `testabc`, Features: `[ECI{index: 4, n: X}]` \
+        /// Here, the ECI escape code will be after "test" and before "abc"
+        /// as: `test[ECI]abc` despite the character `a` being at index 4
+        index: usize,
+
+        /// The ECI escape code value, for example:
+        /// - _\000003_ ⇔ n=3
+        /// - _\000025_ ⇔ n=25
+        n: usize
+    },
+
+    /// Represents an FNC1 escape code in the data stream at the specified
+    /// index. This escape symbol is used to mark the presence of an GS1 AI
+    /// (Application Identifier). Note that this feature may appear multiple
+    /// times in a single code, see GS1 barcode standards for examples.
+    FNC1 {
+        /// The index in the output buffer where the FNC1 is placed.
+        ///
+        /// # Examples:
+        /// Buffer: `gs1test01next`, Features: `[ECI{index: 7}]` \
+        /// Here, the FNC1 escape code will be after "gs1test" and before "next"
+        /// as: `gs1test[FNC1]01next` despite the character `0` being at index 7
+        ///
+        /// Buffer: `800500036510123456`,
+        /// Features: `[FNC1 {index: 0}, FNC1 {index: 10}]` \
+        /// Message with FNC1 markers: `[FNC1]8005000365[FNC1]10123456` \
+        /// Message with GS1 AIs:      `(8005)000365(10)123456`
+        index: usize
+    },
+
+    /// Structured connection or Structured Join allows linking multiple Aztec
+    /// Codes together via discrete headers that contain information about the
+    /// message ID (which may be empty), the ordinal number of the symbol in the
+    /// sequence and the total number of symbols in the sequence. This feature 
+    /// supports up to 26 Aztec Codes linked together.
+    JOIN {
+        /// The message ID that all Aztec Codes part of the same structured join
+        /// share (note that the message ID may be empty).
+        msg_id: Vec<u8>,
+        /// The index of the Aztec Code in the structured join sequence.
+        order: u8,
+        /// The total number of Aztec Codes in the structured join sequence.
+        total: u8
+    }
 }
 
+/// The result of a decode operation on a Aztec Code candidate
 pub struct ReadAztecCode {
     /// Location of the top left corner
     loc: (usize, usize),
@@ -229,19 +291,14 @@ impl ReadAztecCode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 enum Direction {
+    #[default]
     None,
     Down,
     Left,
     Up,
     Right,
-}
-
-impl Default for Direction {
-    fn default() -> Self {
-        Direction::None
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -313,6 +370,12 @@ impl Mode {
     }
 }
 
+enum SJState {
+    None,
+    Detected(bool),
+    Init,
+}
+
 struct AztecReader {
     size: usize,
     layers: usize,
@@ -324,8 +387,7 @@ struct AztecReader {
 type ReaderResults = Result<(Vec<u8>, Vec<AztecCodeFeature>), String>;
 
 impl AztecReader {
-    fn new(codewords: usize, layers: usize) -> Self {
-        let compact = layers <= 4;
+    fn new(layers: usize, codewords: usize, compact: bool) -> Self {
         let bullseye_size = if compact { 11 } else { 15 };
         let raw_size = layers * 4 + bullseye_size;
         let size = if compact {
@@ -357,7 +419,7 @@ impl AztecReader {
             let mid = (size / 2) % 16;
             let mut idx = 0;
             let mut skips = 0;
-            let mut dpl = (layers - 5) * 4 + 32; // domino per line
+            let mut dpl = layers * 4 + 12; // domino per line
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;
@@ -425,7 +487,7 @@ impl AztecReader {
         let mut words = Vec::with_capacity(self.dominos.len() / dpc);
         for codeword in self.dominos[skip..].chunks(dpc) {
             words.push(codeword.iter().fold(0, |acc, dom| {
-                ((dom.head as usize) << 1) | (dom.tail as usize) | (acc << 2)
+                (acc << 2) | ((dom.head as usize) << 1) | (dom.tail as usize)
             }))
         }
         words
@@ -506,11 +568,27 @@ impl AztecReader {
         end
     }
 
+    fn handle_sj(bitstr: &[bool], i: usize,
+        features: &mut Vec<AztecCodeFeature>, msg_id: Vec<u8>) -> usize {
+        if i + 10 > bitstr.len() {
+            return i + 10; // not enough data
+        }
+        let order = Self::get_word_value(&bitstr[i..i+5]);
+        let total = Self::get_word_value(&bitstr[i+5..i+10]);
+        if order > 1 && total > 1 && order < 28 && total < 28 && order <= total{
+            let order = order as u8 - 2;
+            let total = total as u8 - 1; // Starts at 1 (length indicator)
+            features.push(AztecCodeFeature::JOIN{msg_id, order, total});
+        }
+        i + 10
+    }
+
     /// Extract the data and features of the Read Aztec Code
     fn to_words(bitstr: &[bool]) -> ReaderResults {
         let l = bitstr.len();
         let mut words = vec![];
         let mut features = vec![];
+        let mut sj_state = SJState::None; // Structured join state
 
         let mut mode = Mode::Upper;
         let mut shift_mode = None;
@@ -523,15 +601,35 @@ impl AztecReader {
             match current_mode {
                 Mode::Upper | Mode::Lower => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
-                    2..=27 => {
-                        let offset = if current_mode == Mode::Upper {
-                            b'A'
-                        } else {
-                            b'a'
-                        };
-                        words.push(offset + word as u8 - 2);
-                    }
+                    1 => match sj_state {
+                        SJState::Detected(_) => sj_state = SJState::Init,
+                        SJState::Init => {
+                            next = Self::handle_sj(bitstr, next, &mut features,
+                                words.clone());
+                            sj_state = SJState::None;
+                            words.clear();
+                        }
+                        _ => words.push(b' ')
+                    },
+                    2..=27 => match sj_state {
+                        SJState::Detected(false) =>
+                            sj_state = SJState::Detected(true),
+                        SJState::Detected(true) => {
+                            if next > 10 {
+                                next = Self::handle_sj(bitstr, next - 10,
+                                    &mut features, vec![]);
+                            }
+                            sj_state = SJState::None;
+                        },
+                        _ => {
+                            let offset = if current_mode == Mode::Upper {
+                                b'A'
+                            } else {
+                                b'a'
+                            };
+                            words.push(offset + word as u8 - 2);
+                        }
+                    },
                     28 => {
                         if current_mode == Mode::Upper {
                             mode = Mode::Lower;
@@ -547,7 +645,10 @@ impl AztecReader {
                 },
                 Mode::Mixed => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
+                    1 => match sj_state {
+                        SJState::Init => sj_state = SJState::None,
+                        _ => words.push(b' ')
+                    },
                     2..=14 => words.push(1 + word as u8 - 2),
                     15..=19 => words.push(27 + word as u8 - 15),
                     20..=27 => words.push(
@@ -555,7 +656,12 @@ impl AztecReader {
                         [word as usize - 20]
                     ),
                     28 => mode = Mode::Lower,
-                    29 => mode = Mode::Upper,
+                    29 => {
+                        if i == 5 { // Check the Structured join flag (M/L,U/L)
+                            sj_state = SJState::Detected(false);
+                        }
+                        mode = Mode::Upper;
+                    },
                     30 => mode = Mode::Punctuation,
                     31 => next = Self::handle_bytes(bitstr, next, &mut words),
                     _ => return Err(format!("Invalid word {} in Mixed mode",
@@ -581,7 +687,10 @@ impl AztecReader {
                 },
                 Mode::Digit => match word {
                     0 => shift_mode = Some(Mode::Punctuation),
-                    1 => words.push(b' '),
+                    1 => match sj_state {
+                        SJState::Init => sj_state = SJState::None,
+                        _ => words.push(b' ')
+                    },
                     2..=11 => words.push(b'0' + word as u8 - 2),
                     12 => words.push(b','),
                     13 => words.push(b'.'),
@@ -615,12 +724,17 @@ impl AztecReader {
         let mut words = self.as_words(start_align, codeword_size);
         let rs = ReedSolomon::new(codeword_size as u8, prim);
 
-        let nb_check_words = (bits_in_layers / codeword_size) - self.codewords;
+        let total_codewords = bits_in_layers / codeword_size;
+        if self.codewords >= total_codewords {
+            return Err(format!("Invalid codeword count, expected <{}, got {}",
+                    total_codewords, self.codewords));
+        }
+        let nb_check_words = total_codewords - self.codewords;
         rs.fix_errors(&mut words, nb_check_words)?;
 
         let mut bitstr = Vec::with_capacity(self.codewords * codeword_size);
         for byte in words[..self.codewords].iter() {
-            // convert [corrected] the codewords into a bitstring
+            // convert the [corrected] codewords into a bitstring
             bitstr.extend((0..codeword_size).rev()
                 .map(|bit| ((byte >> bit) & 1) == 1));
         }
@@ -641,15 +755,30 @@ pub struct AztecCodeDetector {
 
 impl AztecCodeDetector {
 
-    /// Create a new AztecReader struct from a grayscale image
-    /// 
+    /// Create a new AztecReader struct from a grayscale image. Note that the
+    /// input image is processed (ex: auto contrast and thresholding) to turn it
+    /// into a black and white image.
+    ///
     /// # Arguments
     /// * (`w`, `h`): The width and height of the grayscale image
     /// * `mono`: The grayscale pixel array (8 bits)
-    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector {
+    pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector{
         AztecCodeDetector {
             width: w as usize, height: h as usize,
-            image: mono.iter().map(|&x| x < 104).collect(),
+            image: filters::process_image(mono),
+            markers: vec![]
+        }
+    }
+
+    /// Create a new AztecReader struct from a black and white image
+    ///
+    /// # Arguments
+    /// * (`w`, `h`): The width and height of the grayscale image
+    /// * `mono`: The black and white pixel array (true: black)
+    pub fn raw((w, h): (u32, u32), bw: Vec<bool>) -> AztecCodeDetector {
+        AztecCodeDetector {
+            width: w as usize, height: h as usize,
+            image: bw,
             markers: vec![]
         }
     }
@@ -662,28 +791,28 @@ impl AztecCodeDetector {
         self.markers.clear();
     }
 
-    fn check_ratio(&self, counts: &[usize; 5], total: usize) -> bool {
+    fn check_ratio(&self, counts: &[i32; 5], total: i32) -> bool {
         if total < 5 {
             return false;
         }
-        let mod_size = div_ceil(total as isize, 5);
+        let mod_size = div_ceil(total, 5);
         let max_v = mod_size / 2;
 
         let mut i = 0;
-        while i < 5 && (mod_size - counts[i] as isize).abs() < max_v {
+        while i < 5 && (mod_size - counts[i]).abs() < max_v {
             i += 1;
         }
         i == 5
     }
 
-    fn center_from_end(&self, counts: &[usize; 5], col: usize) -> usize {
-        col - counts[3..].iter().sum::<usize>() - counts[2] / 2
+    fn center_from_end(&self, counts: &[i32; 5], col: usize) -> usize {
+        col - counts[3..].iter().sum::<i32>() as usize - counts[2] as usize / 2
     }
 
-    fn check_vertical(&mut self, start_row: usize, col: usize, mid: usize,
-        total: usize) -> Option<(usize, usize, usize)> {
+    fn check_vertical(&mut self, start_row: usize, col: usize, mid: i32,
+        total: i32) -> Option<(usize, usize, usize)> {
         let mut row = start_row + 1;
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
 
         // Going up to the border of the current square
         while row > 0 && self.get_px(row - 1, col) {
@@ -729,9 +858,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        if (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        if (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
             Some((start, self.center_from_end(&counts, row - 1), row - 2))
         } else {
@@ -739,10 +867,10 @@ impl AztecCodeDetector {
         }
     }
 
-    fn check_horizontal(&self, row: usize, start_col: usize, mid: usize,
-        total: usize) -> Option<(usize, usize, usize)> {
+    fn check_horizontal(&self, row: usize, start_col: usize, mid: i32,
+        total: i32) -> Option<(usize, usize, usize)> {
         let mut col = start_col + 1;
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
 
         // Going up to the border of the current square
         while col > 0 && self.get_px(row, col - 1) {
@@ -788,9 +916,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        if (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        if (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total) {
             Some((start, self.center_from_end(&counts, col - 1), col - 2))
         } else {
@@ -798,9 +925,9 @@ impl AztecCodeDetector {
         }
     }
 
-    fn check_diag(&mut self, row: usize, col: usize, mid: usize, total: usize)
+    fn check_diag(&mut self, row: usize, col: usize, mid: i32, total: i32)
         -> bool {
-        let mut counts = [0usize; 5];
+        let mut counts = [0; 5];
         let mut i = 0;
 
         // Going up to the border of the current square
@@ -846,9 +973,8 @@ impl AztecCodeDetector {
             }
         }
 
-        let total = total as i32;
-        let new_total: usize = counts.iter().sum();
-        (new_total as i32 - total).abs() < 2 * total &&
+        let new_total: i32 = counts.iter().sum();
+        (new_total - total).abs() < 2 * total &&
             self.check_ratio(&counts, new_total)
     }
 
@@ -890,8 +1016,8 @@ impl AztecCodeDetector {
         (row, col)
     }
 
-    fn handle_center(&mut self, counts: &[usize; 5], row: usize, col: usize,
-        total: usize, centers: &mut Vec<AztecCenter>) -> Option<()> {
+    fn handle_center(&mut self, counts: &[i32; 5], row: usize, col: usize,
+        total: i32, centers: &mut Vec<AztecCenter>) -> Option<()> {
 
         let mid_val = counts[2] + counts[3] / 2;
         let center_col = self.center_from_end(counts, col);
@@ -938,6 +1064,7 @@ impl AztecCodeDetector {
     pub fn detect_codes(&mut self) -> Vec<AztecCenter> {
         let mut centers = vec![];
         let mut counts = [0; 5];
+
         for row in 0..self.height {
             counts.fill(0);
             let mut current_state = 0;
@@ -951,7 +1078,7 @@ impl AztecCodeDetector {
                 } else if current_state % 2 == 1 {
                     counts[current_state] += 1;
                 } else if current_state == 4 {
-                    let total: usize = counts.iter().sum();
+                    let total: i32 = counts.iter().sum();
                     if self.check_ratio(&counts, total) &&
                         self.handle_center(&counts, row, col, total,
                             &mut centers).is_some() {
@@ -959,7 +1086,9 @@ impl AztecCodeDetector {
                         current_state = 0;
                     } else {
                         current_state = 3;
-                        counts.rotate_left(2);
+                        counts[0] = counts[2];
+                        counts[1] = counts[3];
+                        counts[2] = counts[4];
                         counts[3] = 1;
                         counts[4] = 0;
                     }
@@ -974,53 +1103,57 @@ impl AztecCodeDetector {
 
     fn sample_block(&mut self, row: usize, col: usize, w: usize, h: usize)
         -> bool {
-        let mut bal: isize = 0;
-        let (w2, h2) = (w / 2, h / 2);
-        for i in 0..=w {
-            for j in 0..=h {
-                let nr = row + j;
-                let nc = col + i;
-                if nr >= h2         && nc >= w2 &&
-                   nr < self.height && nc < self.width {
-                    bal += if self.get_px(nr - h2, nc - w2) { 1 } else { -1 };
-                }
+        let mut bal = 0;
+        let h_end = (col + w).min(self.width);
+        let v_end = (row + h).min(self.height);
+        for nc in col..h_end {
+            for nr in row..v_end {
+                bal += if self.get_px(nr, nc) { 1 } else { -1 };
             }
         }
         bal > 0
     }
 
-    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, block: usize)
+    fn sample_ring(&mut self, center: &AztecCenter, radius: f32, samples: usize)
         -> Vec<bool> {
         let (col, row) = center.loc;
+        let (col, row) = (col as f32, row as f32);
 
-        let dst = (center.mod_size * radius).ceil() as usize;
-        let middle = dst / 2;
-        if col < middle || row < middle ||
-            col + middle > self.width || row + middle > self.height {
+        let side = center.mod_size * radius;
+        let middle = side * 0.5;
+        let bl = center.mod_size * 0.5; // block middle
+        let bl_i = bl.round() as usize; // block middle rounded
+        let ds = center.mod_size; // distance step
+
+        if col < middle || row < middle || col + middle > self.width as f32 ||
+            row + middle > self.height as f32 {
             return vec![];
         }
 
-        let sc = dst / block + 1; // sample_count
-        let bl = block / 2;
-        let mut sample = vec![false; sc * 4];
-        for i in 0..sc {
-            let d = i * block;
+        let samples = samples - 1;
+        let mut sample = vec![false; samples * 4];
+        for i in 0..samples {
+            let d = i as f32 * ds;
 
-            let (r, c) = (row - middle - bl, col - middle + d + block - bl);
-            sample[i] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::green((c, r), (bl, bl)));
+            let srow = (row - middle - bl).round() as usize; // sample row
+            let scol = (col - middle + d + bl).round() as usize; // sample col
+            sample[i] = self.sample_block(srow, scol, bl_i, bl_i);
+            //self.markers.push(Marker::green((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row - middle + d + block - bl, col + middle);
-            sample[i + sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::orange((c, r), (bl, bl)));
+            let srow = (row - middle + d + bl).round() as usize; // sample row
+            let scol = (col + middle).round() as usize; // sample col
+            sample[i + samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            //self.markers.push(Marker::orange((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row + middle, col - middle + d + bl - block);
-            sample[sc - 1 - i + 2 * sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::blue((c, r), (bl, bl)));
+            let srow = (row + middle).round() as usize; // sample row
+            let scol = (col + middle - d - ds).round() as usize; // sample col
+            sample[i + 2 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            //self.markers.push(Marker::blue((scol, srow), (bl_i, bl_i)));
 
-            let (r, c) = (row - middle + d + bl - block, col - middle - bl);
-            sample[sc - 1 - i + 3 * sc] = self.sample_block(r, c, bl, bl);
-            self.markers.push(Marker::red((c, r), (bl, bl)));
+            let srow = (row + middle - d - ds).round() as usize; // sample row
+            let scol = (col - middle - bl).round() as usize; // sample col
+            sample[i + 3 * samples] = self.sample_block(srow, scol, bl_i, bl_i);
+            //self.markers.push(Marker::red((scol, srow), (bl_i, bl_i)));
         }
 
         sample
@@ -1112,15 +1245,20 @@ impl AztecCodeDetector {
         -> Result<ReadAztecCode, AztecReadError> {
         let (col, row) = center.loc;
 
-        let (mut code_type, radius) =
+        let (mut code_type, radius, bullseye_size) =
             if self.check_ring(row, col, center.mod_size, 12.3) {
-                (AztecCodeType::FullSize, 13.5)
+                (AztecCodeType::FullSize, 13.5, 15)
             } else {
-                (AztecCodeType::Compact, 9.5)
+                (AztecCodeType::Compact, 9.5, 11)
             };
 
-        let sz = center.mod_size.round() as usize;
-        let overhead_message = self.sample_ring(&center, radius, sz);
+        let overhead_message = self.sample_ring(&center, radius, bullseye_size);
+        if overhead_message.is_empty() {
+            return Err(AztecReadError::BadSymbolOrientation(
+                    center.as_marker(),
+                    format!("Failed to sample {:?} overhead message",code_type))
+                )
+        }
         let (layers, codewords) =
             self.get_aztec_metadata(center.as_marker(), &mut code_type,
             &overhead_message)?;
@@ -1132,19 +1270,28 @@ impl AztecCodeDetector {
         }
 
         let compact = code_type == AztecCodeType::Compact;
-        let (size, md2, samples) = if compact { // md2 <=> (bullseye size) / 2
-            (11 + 4 * layers, 5, layers * 2)
+        let (size, samples) = if compact {
+            (11 + 4 * layers, layers * 2)
         } else {
             let raw_size = 15 + 4 * layers;
             let anchor_grid = ((raw_size - 1) / 2 - 1) / 15;
             let size = raw_size + 2 * anchor_grid;
-            (size, 7, (layers + anchor_grid) * 2)
+            (size, layers * 2 + anchor_grid)
         };
 
         let mut copy = AztecCode::new(compact, size);
         let mid = size / 2;
+        let md2 = bullseye_size / 2; // md2 <=> (bullseye size) / 2
         for l in 1..=samples {
-            let ring = self.sample_ring(&center, radius + 2.0 * l as f32, sz);
+            let ring = self.sample_ring(&center, radius + 2.0 * l as f32,
+                bullseye_size + l * 2);
+            if ring.is_empty() {
+                return Err(AztecReadError::BadSymbolOrientation(
+                        center.as_marker(),
+                        format!("Failed to sample layer {} (ring out of bound)",
+                        l))
+                    )
+            }
             let arc = ring.len() / 4; // arc length
             for cursor in 0..arc {
                 copy[(mid - md2 - l, mid - md2 + 1 + cursor - l)] =
@@ -1161,7 +1308,7 @@ impl AztecCodeDetector {
             }
         }
 
-        let mut rd = AztecReader::new(codewords, layers);
+        let mut rd = AztecReader::new(layers, codewords, compact);
         rd.extract(copy);
         let (data, features) = rd.read().map_err(|msg|
             AztecReadError::CorruptedMessage(center.as_marker(), msg))?;

@@ -149,7 +149,7 @@ impl AztecWriter {
             let mid = (size / 2) % 16;
             let mut idx = 0;
             let mut skips = 0;
-            let mut dpl = (layers - 5) * 4 + 32; // domino per line
+            let mut dpl = layers * 4 + 12; // domino per line
             for layer in 0..layers {
                 let start = 2 * layer;
                 let end = size - start - 1;

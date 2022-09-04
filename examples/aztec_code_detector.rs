@@ -11,10 +11,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let img = image::open(args.get(1).unwrap()).unwrap().into_luma8();
     let pixels: Vec<u8> = img.enumerate_pixels().map(|(_, _, p)| p[0]).collect();
     let (w, h) = img.dimensions();
-    let mut finder = AztecCodeDetector::from_grayscale((w, h), &pixels);
 
     println!("Finding Aztec Codes...");
     let start = Instant::now();
+    let mut finder = AztecCodeDetector::from_grayscale((w, h), &pixels);
     let candidates = finder.detect_codes();
     println!("Found {} candidates in {:?}", candidates.len(), start.elapsed());
     println!("Here is the results:");
@@ -39,8 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut pixels: Vec<u32> = pixels.iter().map(|&x| x <= 104)
-        .map(|x| if x { 0 } else { 0xffffff }).collect();
+    let mut pixels: Vec<u32> = pixels.iter()
+        .map(|&x| x as u32 * 0xFFFFFF / 255).collect();
     for marker in finder.markers().iter().chain(markers.iter()) {
         let (col, row) = marker.loc();
         let (mw, mh) = marker.size();
