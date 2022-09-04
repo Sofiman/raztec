@@ -53,22 +53,27 @@ pub struct Marker {
 }
 
 impl Marker {
+    /// New red (#FF0000) marker
     pub fn red(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xff0000, loc, size }
     }
 
+    /// New orange (#FFB86C) marker
     pub fn orange(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xffb86c, loc, size }
     }
 
+    /// New green (#00FF00) marker
     pub fn green(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0x00ff00, loc, size }
     }
 
+    /// New blue (#0000FF) marker
     pub fn blue(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0x0000ff, loc, size }
     }
 
+    /// New pink (#FF89c6) marker
     pub fn pink(loc: (usize, usize), size: (usize, usize)) -> Self {
         Marker { color: 0xff79c6, loc, size }
     }
@@ -171,22 +176,57 @@ pub enum AztecCodeType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AztecCodeFeature {
     /// Represents an ECI escape code at the specified index.
-    ECI{index: usize, n: usize},
+    ECI {
+        /// The index in the output buffer after the ECI becomes active.
+        ///
+        /// # Examples:
+        /// Buffer: `testabc`, Features: `[ECI{index: 4, n: X}]` \
+        /// Here, the ECI escape code will be after "test" and before "abc"
+        /// as: `test[ECI]abc` despite the character `a` being at index 4
+        index: usize,
+
+        /// The ECI escape code value, for example:
+        /// - _\000003_ ⇔ n=3
+        /// - _\000025_ ⇔ n=25
+        n: usize
+    },
 
     /// Represents an FNC1 escape code in the data stream at the specified
     /// index. This escape symbol is used to mark the presence of an GS1 AI
     /// (Application Identifier). Note that this feature may appear multiple
     /// times in a single code, see GS1 barcode standards for examples.
-    FNC1{index: usize},
+    FNC1 {
+        /// The index in the output buffer where the FNC1 is placed.
+        ///
+        /// # Examples:
+        /// Buffer: `gs1test01next`, Features: `[ECI{index: 7}]` \
+        /// Here, the FNC1 escape code will be after "gs1test" and before "next"
+        /// as: `gs1test[FNC1]01next` despite the character `0` being at index 7
+        ///
+        /// Buffer: `800500036510123456`,
+        /// Features: `[FNC1 {index: 0}, FNC1 {index: 10}]` \
+        /// Message with FNC1 markers: `[FNC1]8005000365[FNC1]10123456` \
+        /// Message with GS1 AIs:      `(8005)000365(10)123456`
+        index: usize
+    },
 
     /// Structured connection or Structured Join allows linking multiple Aztec
     /// Codes together via discrete headers that contain information about the
     /// message ID (which may be empty), the ordinal number of the symbol in the
     /// sequence and the total number of symbols in the sequence. This feature 
     /// supports up to 26 Aztec Codes linked together.
-    JOIN{msg_id: Vec<u8>, order: u8, total: u8}
+    JOIN {
+        /// The message ID that all Aztec Codes part of the same structured join
+        /// share (note that the message ID may be empty).
+        msg_id: Vec<u8>,
+        /// The index of the Aztec Code in the structured join sequence.
+        order: u8,
+        /// The total number of Aztec Codes in the structured join sequence.
+        total: u8
+    }
 }
 
+/// The result of a decode operation on a Aztec Code candidate
 pub struct ReadAztecCode {
     /// Location of the top left corner
     loc: (usize, usize),
@@ -715,7 +755,9 @@ pub struct AztecCodeDetector {
 
 impl AztecCodeDetector {
 
-    /// Create a new AztecReader struct from a grayscale image
+    /// Create a new AztecReader struct from a grayscale image. Note that the
+    /// input image is processed (ex: auto contrast and thresholding) to turn it
+    /// into a black and white image.
     ///
     /// # Arguments
     /// * (`w`, `h`): The width and height of the grayscale image

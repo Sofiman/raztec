@@ -1,3 +1,5 @@
+//! Image processing helper functions
+
 /// Contrast Stretching
 pub fn normalize_image(buffer: &mut [u8]) -> (u8, u8) {
     let mut mi = 255;
@@ -29,14 +31,13 @@ pub fn linear_transform(buffer: &mut[u8], alpha: f32, beta: f32) {
 /// Black and White Linear Transform => for each pixel: alpha * (pixel) + beta
 /// where **alpha** is the constrast control
 ///       **beta** is the brightness control
-///   and **thresold** is the black and white thresold
-pub fn bw_transform(buffer: &[u8], alpha: f32, beta: f32, thresold: f32)
+///   and **threshold** where any pixel value over will be considered as white
+pub fn bw_transform(buffer: &[u8], alpha: f32, beta: f32, threshold: f32)
     -> Vec<bool> {
-    buffer.iter().map(|&pix| alpha * (pix as f32) + beta < thresold).collect()
+    buffer.iter().map(|&pix| alpha * (pix as f32) + beta < threshold).collect()
 }
 
-/// Auto contrast algorithm
-/// See https://stackoverflow.com/questions/9744255/instagram-lux-effect/9761841#9761841
+/// Auto contrast algorithm. See <https://stackoverflow.com/a/9761841>.
 /// Returns (alpha, beta) for a linear transform
 pub fn auto_contrast(buffer: &[u8]) -> (f32, f32) {
     let mut histogram = [0usize; 256];
@@ -81,6 +82,8 @@ pub fn auto_contrast(buffer: &[u8]) -> (f32, f32) {
     (alpha, beta)
 }
 
+/// Convert a grayscale image into a black and white image using the previously
+/// defined auto-contrast function
 pub fn process_image(mono: &[u8]) -> Vec<bool> {
     let (alpha, beta) = auto_contrast(mono);
     bw_transform(mono, alpha, beta, 104.0)
