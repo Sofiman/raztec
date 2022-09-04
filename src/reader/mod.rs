@@ -1,5 +1,6 @@
 //! Aztec Reader module
 
+pub mod filters;
 use std::fmt::Display;
 use super::{reed_solomon::ReedSolomon, AztecCode};
 
@@ -715,14 +716,22 @@ pub struct AztecCodeDetector {
 impl AztecCodeDetector {
 
     /// Create a new AztecReader struct from a grayscale image
-    /// 
+    ///
     /// # Arguments
     /// * (`w`, `h`): The width and height of the grayscale image
     /// * `mono`: The grayscale pixel array (8 bits)
     pub fn from_grayscale((w, h): (u32, u32), mono: &[u8]) -> AztecCodeDetector{
         AztecCodeDetector {
             width: w as usize, height: h as usize,
-            image: mono.iter().map(|&x| x < 104).collect(),
+            image: filters::process_image(mono),
+            markers: vec![]
+        }
+    }
+
+    pub fn raw((w, h): (u32, u32), bw: Vec<bool>) -> AztecCodeDetector {
+        AztecCodeDetector {
+            width: w as usize, height: h as usize,
+            image: bw,
             markers: vec![]
         }
     }
