@@ -47,5 +47,5 @@ please open an issue so I can look into it.
 
 ## TODO
 
-- Implement an Aztec code reader
-- Add support for combined Aztec Codes (Structured connection)
+- Add code generation for combined Aztec Codes (Structured connection)
+- Support scanning rotated or skewed aztec codes

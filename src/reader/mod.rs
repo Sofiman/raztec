@@ -728,6 +728,11 @@ impl AztecCodeDetector {
         }
     }
 
+    /// Create a new AztecReader struct from a black and white image
+    ///
+    /// # Arguments
+    /// * (`w`, `h`): The width and height of the grayscale image
+    /// * `mono`: The black and white pixel array (true: black)
     pub fn raw((w, h): (u32, u32), bw: Vec<bool>) -> AztecCodeDetector {
         AztecCodeDetector {
             width: w as usize, height: h as usize,
